@@ -230,8 +230,10 @@ export default function DocsPage() {
               <P>
                 The registry is the contract. A generated UI can only ever invoke an action whose id
                 appears in <Ic>registry.actions</Ic>, and read a source whose id appears in{' '}
-                <Ic>registry.dataSources</Ic>. If there is no <Ic>deleteTask</Ic>, deletion is
-                impossible by construction.
+                <Ic>registry.dataSources</Ic>. If there is no <Ic>deleteTask</Ic>, code that calls it is
+                refused before it runs and the bridge rejects it at runtime. Declare <Ic>args</Ic> with
+                types — the bridge validates them — and add <Ic>returns</Ic> to the actions whose return
+                value generated code may see.
               </P>
               <P>
                 Treat each registered action like a public endpoint the user can call with arbitrary
@@ -257,7 +259,9 @@ export default function DocsPage() {
               </ul>
               <P>
                 <Ic>fetch</Ic>, cookies, storage, and any external resource do not work inside the
-                sandbox — all I/O is <Ic>postMessage</Ic> through the bridge.
+                sandbox — all I/O goes through a private <Ic>MessageChannel</Ic> to the bridge. The server
+                endpoint (<Ic>createVeneerHandler</Ic> from <Ic>veneer-sdk/server</Ic>) owns the registry,
+                caps and rate-limits requests, and scans generated code before returning it.
               </P>
             </section>
 
@@ -277,12 +281,14 @@ export default function DocsPage() {
 
             <section className="mt-12">
               <H id="security">Security model</H>
-              <P>Three independent layers, none of which depend on the model behaving:</P>
+              <P>Three independent layers, none of which depend on the model behaving, plus a static scan and a watchdog:</P>
               <ul className="mt-4 space-y-3">
                 {[
-                  ['Opaque origin', 'sandbox="allow-scripts" with no allow-same-origin — no access to the parent’s cookies, DOM, or storage.'],
-                  ['No network', "A strict CSP sets connect-src 'none', so generated code can’t fetch, XHR, open a WebSocket, or send a beacon."],
-                  ['Validated bridge', 'The parent validates every { action, args } message against the registry and runs the real implementation only if the id is registered.'],
+                  ['Opaque origin', 'sandbox="allow-scripts allow-forms" with no allow-same-origin — no access to the parent’s cookies, DOM, or storage; no popups, downloads or top-level navigation.'],
+                  ['No network', "A strict CSP sets connect-src 'none' and pins the four runtime scripts by exact URL (with SRI), so generated code can’t fetch, XHR, open a WebSocket, send a beacon, or import anything."],
+                  ['Validated bridge', 'A private MessageChannel. Every action is validated — registered id, declared args and types, rate limit — before the real implementation runs; only declared return values and registered data cross back.'],
+                  ['Scan + watchdog', 'Generated code is parsed and refused if it reaches for window, document, location, network globals, this, imports or unregistered ids. If a frame navigates itself or hangs, the canvas is reset and onSecurityViolation fires.'],
+                  ['Known limit', 'A sandboxed frame can always navigate itself, and no browser lets a host prevent that — Veneer detects it and shuts the frame down, but data already inside the frame could leave in that first URL. Serve the frame from a URL (frameSrc) if your page has a strict CSP; see the SDK README for every residual.'],
                 ].map(([t, b]) => (
                   <li key={t} className="flex gap-3">
                     <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">

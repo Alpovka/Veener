@@ -1,116 +1,178 @@
-/**
- * Builds the srcDoc for the sandboxed iframe.
- *
- * SECURITY MODEL (this is the product):
- *  - The iframe is mounted with sandbox="allow-scripts" and NO allow-same-origin, so it
- *    runs at an opaque origin: it cannot read the parent's cookies, localStorage, or DOM.
- *    (Never combine allow-scripts with allow-same-origin — that would defeat the sandbox.)
- *  - A strict Content-Security-Policy sets connect-src 'none' and img/font 'none', so code
- *    running inside the frame cannot fetch(), XHR, open a WebSocket, send a beacon, or load
- *    any external resource. It has no network. All I/O goes through postMessage only.
- *  - script-src is locked to 'self'-inline plus the two trusted CDN origins that serve the
- *    React/Babel/Tailwind runtime. The generated component itself is inline code; it cannot
- *    pull in arbitrary scripts from anywhere else.
- *
- * The only window into the host is `window.veneer`, which talks to the parent bridge. The
- * bridge validates every action id against the registry, so a generated UI can only trigger
- * capabilities the developer explicitly registered.
- */
-export function buildFrameSrcDoc() {
-  const csp = [
-    "default-src 'none'",
-    "script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com",
-    "style-src 'unsafe-inline' https://cdn.tailwindcss.com",
-    "img-src data:",
-    "font-src data:",
-    "connect-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-  ].join('; ');
+import { createScanner } from './scan.js';
 
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}" />
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>html,body{margin:0;padding:0;background:transparent;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}</style>
-</head>
-<body>
-<div id="root"></div>
-<script>
+/**
+ * Builds the document for the sandboxed iframe.
+ *
+ * SECURITY MODEL (this is the product). Layers, and what each one actually buys:
+ *
+ *  1. Opaque origin. The iframe is mounted with sandbox="allow-scripts allow-forms" and NO
+ *     allow-same-origin, so generated code cannot read the parent's cookies, storage or DOM.
+ *     (Never combine allow-scripts with allow-same-origin — that would defeat the sandbox.)
+ *
+ *  2. CSP. `connect-src 'none'` blocks fetch/XHR/WebSocket/beacon; `default-src 'none'` blocks
+ *     every other subresource; `form-action 'none'` blocks form submissions; `script-src` lists
+ *     the four pinned runtime URLs by exact path, so `import('https://unpkg.com/anything')` is
+ *     blocked too. `'unsafe-inline'`/`'unsafe-eval'` are unavoidable (inline runtime + Babel).
+ *     Runtime scripts carry SRI hashes where the CDN serves npm bytes verbatim.
+ *     NOTE: a srcdoc document also INHERITS the host page's CSP. Hosts with a strict CSP should
+ *     serve this document from a URL instead (see server/buildFrameResponse + `frameSrc`).
+ *
+ *  3. Bridge over a MessageChannel. The host transfers a private MessagePort in the `init`
+ *     message; everything afterwards travels on that port. A port belongs to the document it
+ *     was delivered to, so if generated code navigates the frame away, the new document has no
+ *     channel to the host. The host additionally treats any post-init `load` event or missed
+ *     heartbeats as a violation and tears the frame down (see VeneerFrame.js).
+ *
+ *  4. Static scan before eval. `createScanner` (scan.js) rejects code that touches
+ *     window/document/location/network globals, `this`, imports, or unregistered ids. Lint +
+ *     speed bump, not a boundary (see scan.js).
+ *
+ * RESIDUAL, BY DESIGN OF THE WEB PLATFORM: a sandboxed frame may always navigate ITSELF, and CSP
+ * does not govern navigations. Data already inside the frame could therefore be encoded into a
+ * URL before the host detects the navigation. The click/submit guards below stop accidental
+ * anchor/form navigation and the scanner rejects `location`, but a determined bypass can only
+ * be DETECTED (load event / heartbeat) and shut down, not prevented. (Chrome's iframe `csp`
+ * attribute does not help: it refuses to render the attacker's response, after the request has
+ * already been sent.) Push only data you are willing to show the user.
+ */
+
+export const RUNTIME_SCRIPTS = [
+  {
+    url: 'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
+    integrity: 'sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z',
+  },
+  {
+    url: 'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
+    integrity: 'sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1',
+  },
+  {
+    url: 'https://unpkg.com/@babel/standalone@7.29.8/babel.min.js',
+    integrity: 'sha384-Ux6uBqExf/7ahsSNrA9VI7vuaw6sKjDoVdjdUxmIoL2qdlzFVZ157sTi6JK3Z9Q8',
+  },
+  // The Tailwind Play CDN build is generated by the CDN and is not published to npm, so there
+  // is nothing to hash it against. Version-pinned URL only.
+  { url: 'https://cdn.tailwindcss.com/3.4.19', integrity: null },
+];
+
+export const FRAME_CSP = [
+  "default-src 'none'",
+  `script-src 'unsafe-inline' 'unsafe-eval' ${RUNTIME_SCRIPTS.map((s) => s.url).join(' ')}`,
+  "style-src 'unsafe-inline'",
+  'img-src data: blob:',
+  'font-src data:',
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+
+/** sandbox flags: scripts (required) + forms (so onSubmit handlers fire; form-action 'none' still blocks submission navigation). */
+export const FRAME_SANDBOX = 'allow-scripts allow-forms';
+
+export const PROTOCOL_VERSION = 2;
+
+function scriptTags() {
+  return RUNTIME_SCRIPTS.map((s) =>
+    s.integrity
+      ? `<script src="${s.url}" integrity="${s.integrity}" crossorigin="anonymous"></script>`
+      : `<script src="${s.url}"></script>`
+  ).join('\n');
+}
+
+const RUNTIME = `
 (function () {
   var React = window.React, ReactDOM = window.ReactDOM, Babel = window.Babel;
+  if (!React || !ReactDOM || !Babel) {
+    document.getElementById('root').textContent = 'The Veneer runtime could not load.';
+    return;
+  }
+  var scan = (__SCANNER__)(Babel.packages.parser, Babel.packages.traverse.default || Babel.packages.traverse);
+
+  var port = null;
   var dataCache = {};
   var pending = {};
   var callSeq = 0;
+  var actionIds = [];
+  var dataIds = [];
+  var options = {};
+  var MAX_PENDING = 64;
+  var MAX_CODE_CHARS = 200000;
 
   function send(msg) {
-    var payload = Object.assign({ source: 'veneer-frame' }, msg);
-    parent.postMessage(payload, '*');
+    if (!port) return;
+    try { port.postMessage(msg); } catch (e) { /* non-cloneable payloads are dropped */ }
   }
+  function has(list, id) { for (var i = 0; i < list.length; i++) if (list[i] === id) return true; return false; }
 
-  // The entire capability surface available to generated code.
-  window.veneer = {
-    // Trigger a registered action. Returns a Promise that resolves with the impl's result.
+  // The entire capability surface available to generated code. Frozen and non-writable so a
+  // generation cannot swap it for another (same trust domain, but keeps errors honest).
+  var veneer = Object.freeze({
     action: function (id, args) {
       return new Promise(function (resolve, reject) {
+        if (!port) return reject(new Error('Veneer bridge is not connected.'));
+        if (!has(actionIds, id)) return reject(new Error('Action "' + id + '" is not registered.'));
+        var count = 0; for (var k in pending) count++;
+        if (count >= MAX_PENDING) return reject(new Error('Too many pending actions.'));
         var callId = ++callSeq;
-        pending[callId] = { resolve: resolve, reject: reject };
-        send({ type: 'action', callId: callId, action: id, args: args || {} });
+        var timeoutMs = options.actionTimeoutMs || 30000;
+        var timer = setTimeout(function () {
+          if (pending[callId]) { delete pending[callId]; reject(new Error('Action "' + id + '" timed out.')); }
+        }, timeoutMs);
+        pending[callId] = { resolve: resolve, reject: reject, timer: timer };
+        send({ type: 'action', callId: callId, action: id, args: args === undefined ? {} : args });
       });
     },
-    // Read a registered data source (synchronous, from the locally-mirrored cache).
     data: function (sourceId) {
+      if (!has(dataIds, sourceId)) throw new Error('Data source "' + sourceId + '" is not registered.');
       return dataCache[sourceId] !== undefined ? dataCache[sourceId] : [];
-    },
-  };
+    }
+  });
+  Object.defineProperty(window, 'veneer', { value: veneer, writable: false, configurable: false, enumerable: true });
+
+  // Accident guards. A sandboxed frame can still navigate itself programmatically; these only
+  // stop the common cases (anchor clicks, form submissions). See the header comment.
+  function guardClick(ev) {
+    var el = ev.target;
+    while (el && el !== document) {
+      if (el.tagName === 'A' || el.tagName === 'AREA') { ev.preventDefault(); return; }
+      el = el.parentNode;
+    }
+  }
+  document.addEventListener('click', guardClick, true);
+  document.addEventListener('auxclick', guardClick, true);
+  document.addEventListener('submit', function (ev) { ev.preventDefault(); }, true);
 
   var reactRoot = ReactDOM.createRoot(document.getElementById('root'));
 
   function fallback(message) {
     reactRoot.render(
-      React.createElement(
-        'div',
+      React.createElement('div',
         { style: { padding: '24px', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui' } },
-        message || "Couldn't render this view. Try asking again."
-      )
-    );
+        message || "Couldn't render this view. Try asking again."));
   }
 
   // Error boundary: a bad generation shows a friendly message instead of breaking anything.
   var ErrorBoundary = (function () {
-    function EB(props) {
-      React.Component.call(this, props);
-      this.state = { err: null };
-    }
+    function EB(props) { React.Component.call(this, props); this.state = { err: null }; }
     EB.prototype = Object.create(React.Component.prototype);
     EB.prototype.constructor = EB;
     EB.getDerivedStateFromError = function (err) { return { err: err }; };
     EB.prototype.componentDidCatch = function (err) {
-      send({ type: 'error', message: String((err && err.message) || err) });
+      send({ type: 'error', kind: 'render', message: String((err && err.message) || err) });
     };
     EB.prototype.render = function () {
       if (this.state.err) {
-        return React.createElement(
-          'div',
+        return React.createElement('div',
           { style: { padding: '24px', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui' } },
-          "Couldn't render this view. Try asking again."
-        );
+          "Couldn't render this view. Try asking again.");
       }
       return this.props.children;
     };
     return EB;
   })();
 
-  // Re-renders the generated UI whenever fresh data is pushed from the host.
-  // We clone the element on every render so React gets a NEW child reference and
-  // actually re-renders the component (passing the same element object would hit
-  // React's "same reference" bailout and the UI would never reflect new data).
-  // Cloning keeps the same component type/position, so its hook state is preserved.
+  // Re-renders the generated UI whenever fresh data arrives. Cloning gives React a new child
+  // reference (otherwise the same-element bailout would skip the re-render) while keeping the
+  // component type/position, so hook state is preserved.
   function VeneerRoot(props) {
     var s = React.useState(0);
     var force = s[1];
@@ -123,55 +185,94 @@ export function buildFrameSrcDoc() {
     return React.createElement(ErrorBoundary, null, child);
   }
 
-  // Provided to generated code as render(<App/>).
-  function render(el) {
-    reactRoot.render(React.createElement(VeneerRoot, { el: el }));
-  }
+  function render(el) { reactRoot.render(React.createElement(VeneerRoot, { el: el })); }
 
   function runCode(code) {
     if (!code) { fallback('Ask the AI to design this page.'); return; }
+    if (typeof code !== 'string' || code.length > MAX_CODE_CHARS) {
+      send({ type: 'scan-violation', violations: ['code is not a string or exceeds ' + MAX_CODE_CHARS + ' characters'] });
+      fallback('This view was blocked by the safety scan.');
+      return;
+    }
+    var result = scan(code, { actionIds: actionIds, dataIds: dataIds });
+    if (!result.ok) {
+      send({ type: 'scan-violation', violations: result.violations });
+      fallback('This view was blocked by the safety scan.');
+      return;
+    }
     try {
       var transformed = Babel.transform(code, { presets: ['react'] }).code;
       var fn = new Function(
         'React', 'useState', 'useEffect', 'useMemo', 'useCallback', 'useRef', 'veneer', 'render',
-        transformed
+        "'use strict';\\n" + transformed
       );
-      fn(
-        React, React.useState, React.useEffect, React.useMemo, React.useCallback, React.useRef,
-        window.veneer, render
-      );
+      fn(React, React.useState, React.useEffect, React.useMemo, React.useCallback, React.useRef, veneer, render);
     } catch (e) {
-      send({ type: 'error', message: String((e && e.message) || e) });
+      send({ type: 'error', kind: 'compile', message: String((e && e.message) || e) });
       fallback();
     }
   }
 
-  window.addEventListener('message', function (ev) {
+  function onPortMessage(ev) {
     var d = ev.data;
-    if (!d || d.source !== 'veneer-host') return;
-    if (d.type === 'init') {
-      dataCache = d.data || {};
-      runCode(d.code);
-    } else if (d.type === 'render') {
-      if (d.data) dataCache = d.data;
-      runCode(d.code);
-    } else if (d.type === 'data') {
+    if (!d || typeof d.type !== 'string') return;
+    if (d.type === 'data') {
       dataCache = d.data || {};
       window.dispatchEvent(new Event('veneer:dataupdate'));
     } else if (d.type === 'action-result') {
       var p = pending[d.callId];
       if (p) {
         delete pending[d.callId];
-        if (d.ok) p.resolve(d.result);
-        else p.reject(new Error(d.error || 'action failed'));
+        clearTimeout(p.timer);
+        if (d.ok) p.resolve(d.result); else p.reject(new Error(d.error || 'action failed'));
       }
+    } else if (d.type === 'ping') {
+      send({ type: 'pong', seq: d.seq });
     }
-  });
+  }
 
-  // Tell the host we're ready to receive the initial code + data.
-  send({ type: 'ready' });
+  // The ONE window message we accept: "init" from our parent, carrying the private port.
+  function onInit(ev) {
+    if (ev.source !== window.parent) return;
+    var d = ev.data;
+    if (!d || d.source !== 'veneer-host' || d.type !== 'init') return;
+    if (!ev.ports || !ev.ports[0]) return;
+    window.removeEventListener('message', onInit);
+    port = ev.ports[0];
+    port.onmessage = onPortMessage;
+    actionIds = Array.isArray(d.actionIds) ? d.actionIds : [];
+    dataIds = Array.isArray(d.dataIds) ? d.dataIds : [];
+    options = d.options || {};
+    dataCache = d.data || {};
+    runCode(d.code);
+    send({ type: 'started' });
+  }
+  window.addEventListener('message', onInit);
+
+  // Tell the host we're ready to receive init. Only the trusted runtime has run at this point.
+  parent.postMessage({ source: 'veneer-frame', type: 'ready', v: __VERSION__ }, '*');
 })();
-</script>
+`;
+
+/** The complete HTML document for the sandbox (used for srcDoc and for server/buildFrameResponse). */
+export function buildFrameSrcDoc() {
+  const runtime = RUNTIME
+    .replace('__SCANNER__', createScanner.toString())
+    .replace('__VERSION__', String(PROTOCOL_VERSION));
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}" />
+<meta name="referrer" content="no-referrer" />
+${scriptTags()}
+<style>html,body{margin:0;padding:0;background:transparent;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}</style>
+</head>
+<body>
+<div id="root"></div>
+<script>${runtime}</script>
 </body>
 </html>`;
 }
+
+export const buildFrameHtml = buildFrameSrcDoc;

@@ -18,7 +18,7 @@ exactly the capabilities you registered — nothing else.
 
 So the AI can invent any layout it likes — a kanban board, a calendar, a dashboard, a timeline —
 but a generated UI **can only ever trigger actions that were registered.** If there is no
-registered delete action, deleting a record is impossible *by construction*, even though the AI
+registered delete action, deleting a record is refused on every layer, even though the AI
 writes free-form code.
 
 It's "MCP for the UI layer": you expose a typed, described capability surface; the model composes
@@ -32,38 +32,59 @@ veneer/
 └── veneer-demo/    # a polished Next.js demo app that consumes the SDK locally
 ```
 
-The website (`veneer-demo`) depends on the local package via `"veneer-sdk": "file:../veneer-sdk"`,
-so you develop against the real SDK source.
+The website (`veneer-demo`) depends on a copy of the package at `veneer-demo/veneer-sdk`
+(`"veneer-sdk": "file:./veneer-sdk"`, so Vercel can build it). `veneer-sdk/` is the source of
+truth; run `npm run sync-demo` in `veneer-sdk` after changing it.
 
 ---
 
 ## The security model (the core of the product)
 
-This is the part that matters. Three layers, each load-bearing:
+This is the part that matters. Three enforcement layers, a static scan, and a watchdog. Each is
+described with what it actually stops; the residual risks are listed too, because a security
+product that hides them is not one.
 
-1. **Opaque origin.** Generated code renders inside `<iframe sandbox="allow-scripts">` with **no**
-   `allow-same-origin`. The frame runs at an opaque origin: no access to the parent's cookies,
-   `localStorage`, or DOM. (Combining `allow-scripts` with `allow-same-origin` would defeat the
-   sandbox — Veneer never does this.)
+1. **Opaque origin.** Generated code renders inside `<iframe sandbox="allow-scripts allow-forms">`
+   with **no** `allow-same-origin`. It cannot read the host's cookies, storage or DOM, cannot open
+   popups, downloads or dialogs, and cannot navigate the host page.
 
-2. **No network.** The iframe document carries a strict Content-Security-Policy including
-   `connect-src 'none'` (plus `img-src`/`font-src` locked down). Code inside the frame **cannot
-   `fetch`, XHR, open a WebSocket, or send a beacon** to anything. The runtime libraries
-   (React/Babel/Tailwind) load from two pinned, trusted CDN origins in `script-src`; the generated
-   component itself is inline and has no other way to reach the network.
+2. **No network.** The frame's Content-Security-Policy is `default-src 'none'; connect-src 'none';
+   form-action 'none'`, and `script-src` lists the four runtime scripts (React, ReactDOM, Babel,
+   Tailwind) by exact, version-pinned URL with SRI hashes where the CDN serves npm bytes. Generated
+   code cannot `fetch`, XHR, open a WebSocket, send a beacon, load an image or font, or import any
+   other script.
 
-3. **Validated bridge.** A bridge runs in the parent. It receives `{ action, args }` messages from
-   the iframe, validates the action id against the registry, runs the **real** implementation only
-   if it's registered, and posts results back. Live data is pushed *into* the frame the same way.
-   The generated code has no other path to anything.
+3. **Validated bridge over a private channel.** The host hands the frame a `MessagePort` once, in
+   an `init` message, and never listens to the frame's window messages again. Every action request
+   on that port is checked against the registry — registered id, declared args only, required args,
+   type checks inferred from your `type` text (or your own `validate(args)`), no prototype-polluting
+   keys, size/depth caps, a rate limit — *before* your implementation runs. Only declared return
+   values go back, and only registered data sources are pushed in.
 
-Put together: even if a generated UI *tried* to delete a task by calling the network directly, the
-opaque origin blocks host access, `connect-src 'none'` blocks the request, and — since no
-`deleteTask` action is registered — the bridge would reject the call anyway. Deletion is impossible
-on every layer at once.
+Then two more things, which are not boundaries but make the boundaries hard to reach:
 
-Customizations are **per-user and private**: the generated UI is stored in `localStorage` only.
-No sharing in this version.
+- **Static scan before eval.** The frame parses the generated code and refuses anything that touches
+  `window`, `document`, `location`, network globals, `this`, imports, `dangerouslySetInnerHTML`, or a
+  non-literal/unregistered `veneer.action`/`veneer.data` id. The server runs the same scan before
+  returning code, so the chat can explain *why* instead of showing a broken canvas.
+- **Watchdog.** Every UI runs in a fresh document. If that document is ever replaced (a `load` event
+  after init) or stops answering heartbeats, the host closes the channel, quarantines the code,
+  restores the default UI and calls `onSecurityViolation`.
+
+**Known limit.** A sandboxed frame may always navigate *itself*, and no browser lets the host
+forbid that. Veneer neutralises anchor clicks and form posts, rejects `location` in the scan, and
+detects and shuts down any navigation, but a deliberate bypass could encode data *already inside
+the frame* into that first URL. Push only data you would show that user on screen anyway. The other
+residuals (host CSP inheritance and the `frameSrc` fix, CPU hot loops, UI spoofing) are in
+`veneer-sdk/README.md`.
+
+**The server owns the registry.** The client sends `{ message, history, currentUI }` only; the
+generator endpoint (`createVeneerHandler` from `veneer-sdk/server`) builds the prompt from *its*
+registry, requires same-origin JSON requests, caps sizes, rate-limits, times out the model and scans
+the result. It is not an open LLM proxy.
+
+Customizations are **per-user and private**: the generated UI is stored in `localStorage` under a
+key you choose (`storageKey`, e.g. `veneer-ui:<userId>`). No sharing in this version.
 
 ---
 
@@ -113,11 +134,13 @@ See **`veneer-sdk/README.md`** for the full SDK API.
 You'll need **Node 18+** and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
 
 ```bash
-# 1. Install the SDK's own (it has none beyond peer deps, but this primes the local link)
+# 1. Install the SDK (server deps + test tooling) and run its tests
 cd veneer-sdk
 npm install
+npm test            # unit tests
+npm run test:e2e    # browser tests in Chromium (sandbox, bridge, CSP, navigation detection)
 
-# 2. Install the demo (this links the local veneer-sdk via file:../veneer-sdk)
+# 2. Install the demo (this links its veneer-sdk copy via file:./veneer-sdk)
 cd ../veneer-demo
 npm install
 
@@ -140,9 +163,10 @@ Click **“Talk with AI to change the look of this page”** (bottom-right) and 
   archiving works through the bridge; refresh persists the layout (`localStorage`).
 - **“Show a calendar by due date.”** → the AI invents a calendar view by reading `tasks` and
   grouping by `dueDate` (not from a fixed list).
-- **“Add a delete button on each task.”** → politely refused — no `deleteTask` is registered, so it
-  keeps the prior UI and explains. And even if the generated code *tried* to delete via the
-  network, the sandbox + `connect-src 'none'` + bridge validation make it impossible.
+- **“Add a delete button on each task.”** → politely refused — no `deleteTask` is registered, so
+  the server's scan returns `code: null` with an explanation and the prior UI stays. Had the code
+  reached the frame anyway, the in-frame scan refuses to run it, the CSP gives it no network, and
+  the bridge rejects the call.
 
 ---
 

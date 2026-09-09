@@ -2,16 +2,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useVeneer } from './context';
 
+const MAX_HISTORY_TURNS = 20;
+
 /**
- * Floating chat. The end user describes how they want the page to look; we POST the request
- * (with the registry, current UI, and recent history) to the host's /api/veneer endpoint,
- * then swap in + persist the returned UI code. Capabilities the AI can use are bounded by
- * the registry, so the model is told up front exactly what's available.
+ * Floating chat. The end user describes how they want the page to look; we POST
+ * { message, history, currentUI } to the host's generator endpoint (default /api/veneer — see
+ * `createVeneerHandler` in veneer-sdk/server), then swap in + persist the returned UI code.
+ *
+ * The registry is NOT sent: the server owns it. Returned code runs in a fresh sandbox document
+ * where it is statically scanned before evaluation, and every action it triggers is validated by
+ * the bridge — this component never has to trust the endpoint.
  *
  * Styled with inline styles so the package carries no dependency on the host app's CSS / Tailwind.
  */
-export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'viewport' }) {
-  const { registry, ui, setUi, reset } = useVeneer();
+export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'viewport', headers }) {
+  const { ui, setUi, reset, violation, clearViolation } = useVeneer();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [history, setHistory] = useState([]);
@@ -20,27 +25,36 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [history, open, busy]);
+  }, [history, open, busy, violation]);
 
   async function send() {
     const message = input.trim();
     if (!message || busy) return;
     setInput('');
-    const priorHistory = history;
+    const priorHistory = history.slice(-MAX_HISTORY_TURNS);
     setHistory((h) => [...h, { role: 'user', content: message }]);
     setBusy(true);
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, registry, currentUI: ui, history: priorHistory }),
+        headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+        credentials: 'same-origin',
+        body: JSON.stringify({ message, currentUI: ui, history: priorHistory }),
       });
-      const json = await res.json();
-      if (json.error) {
-        setHistory((h) => [...h, { role: 'assistant', content: 'Error: ' + json.error }]);
+      let json = null;
+      try {
+        json = await res.json();
+      } catch (e) {
+        json = null;
+      }
+      if (!res.ok || !json || typeof json !== 'object') {
+        const msg = json && typeof json.error === 'string' ? json.error : `The design service returned an error (${res.status}).`;
+        setHistory((h) => [...h, { role: 'assistant', content: 'Error: ' + msg }]);
+      } else if (json.error) {
+        setHistory((h) => [...h, { role: 'assistant', content: 'Error: ' + String(json.error) }]);
       } else {
-        if (json.code) setUi(json.code);
-        setHistory((h) => [...h, { role: 'assistant', content: json.reply || 'Done.' }]);
+        if (typeof json.code === 'string' && json.code.trim()) setUi(json.code);
+        setHistory((h) => [...h, { role: 'assistant', content: typeof json.reply === 'string' && json.reply ? json.reply : 'Done.' }]);
       }
     } catch (e) {
       setHistory((h) => [...h, { role: 'assistant', content: 'Network error — please try again.' }]);
@@ -158,6 +172,14 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
                 {m.content}
               </div>
             ))}
+            {violation && (
+              <div style={S.notice} role="alert">
+                <strong>Reverted for safety.</strong> {violationText(violation)}
+                <button onClick={clearViolation} style={{ ...S.ghostBtn, marginLeft: 8 }}>
+                  Dismiss
+                </button>
+              </div>
+            )}
             {busy && <div style={S.aiMsg}>Designing…</div>}
           </div>
 
@@ -187,6 +209,19 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
       )}
     </>
   );
+}
+
+function violationText(v) {
+  switch (v && v.reason) {
+    case 'frame-navigated':
+      return 'The generated view tried to leave the sandbox, so it was stopped and the default view restored.';
+    case 'frame-unresponsive':
+      return 'The generated view stopped responding, so it was stopped and the default view restored.';
+    case 'scan-violation':
+      return 'The generated view used something outside the allowed capabilities, so it was not run.';
+    default:
+      return 'The generated view was stopped and the default view restored.';
+  }
 }
 
 function SparkleIcon() {
@@ -273,6 +308,16 @@ const S = {
     fontSize: 13,
     maxWidth: '85%',
     whiteSpace: 'pre-wrap',
+  },
+  notice: {
+    alignSelf: 'stretch',
+    background: '#fff7ed',
+    border: '1px solid #fed7aa',
+    color: '#9a3412',
+    padding: '8px 12px',
+    borderRadius: 10,
+    fontSize: 12.5,
+    lineHeight: 1.5,
   },
   suggestion: {
     textAlign: 'left',

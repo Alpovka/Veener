@@ -69,7 +69,14 @@ export default function Home() {
   const reload = useCallback(() => setTasks(initialTasks), []);
 
   return (
-    <VeneerProvider registry={registry} actions={actions} data={data} defaultUI={defaultUI} persist="memory">
+    <VeneerProvider
+      registry={registry}
+      actions={actions}
+      data={data}
+      defaultUI={defaultUI}
+      persist="memory"
+      onSecurityViolation={(v) => console.warn('[veneer] sandbox violation:', v.reason, v)}
+    >
       <div className="min-h-screen bg-white text-slate-900 dark:bg-[#070b18] dark:text-slate-200">
         <SiteNav overHero />
         <Hero />
@@ -641,7 +648,11 @@ function LiveDemo({ reload }) {
               </div>
               {/* Keep the iframe mounted across tab switches so demo state persists. */}
               <div className={tab === 'preview' ? '' : 'hidden'}>
-                <VeneerFrame style={{ height: 560, background: '#f8fafc' }} />
+                <VeneerFrame
+                  frameSrc="/veneer-frame"
+                  style={{ height: 560, background: '#f8fafc' }}
+                  onError={(e) => console.warn('[veneer]', e)}
+                />
               </div>
               <div className={tab === 'code' ? '' : 'hidden'}>
                 <DemoCode />
@@ -963,20 +974,20 @@ function Security() {
     {
       n: '1',
       title: 'Opaque origin',
-      code: 'sandbox="allow-scripts"',
-      body: 'No allow-same-origin, so the frame runs at an opaque origin: zero access to the parent’s cookies, localStorage, or DOM.',
+      code: 'sandbox="allow-scripts allow-forms"',
+      body: 'No allow-same-origin, so the frame runs at an opaque origin: zero access to the parent’s cookies, localStorage, or DOM, and no popups, downloads or top-level navigation.',
     },
     {
       n: '2',
       title: 'No network',
       code: "connect-src 'none'",
-      body: 'A strict CSP means generated code cannot fetch, XHR, open a WebSocket, or send a beacon. There is no path off the page.',
+      body: 'A strict CSP means generated code cannot fetch, XHR, open a WebSocket, send a beacon, or load anything but four pinned, hash-verified runtime scripts.',
     },
     {
       n: '3',
       title: 'Validated bridge',
-      code: 'registry.actions[id]',
-      body: 'The parent validates every { action, args } message against the registry and runs the real implementation only if the id is registered.',
+      code: 'MessageChannel → registry.actions[id]',
+      body: 'The frame talks to your app over a private port. Every action is checked against the registry — id, declared args, types, rate — before the real implementation runs. Only declared return values and registered data cross back.',
     },
   ];
 
@@ -1000,7 +1011,8 @@ function Security() {
           </h2>
           <p className="mt-4 text-slate-600 dark:text-slate-300">
             The model can write anything. It still can’t do anything you didn’t allow.
-            Three independent layers each block the same impossible action — at once.
+            Three independent layers enforce the same contract, plus a static scan before any code runs
+            and a watchdog that resets the canvas if a generation ever steps out of line.
           </p>
         </Reveal>
 
@@ -1031,13 +1043,13 @@ function Security() {
               </code>
               <span className="text-slate-400 dark:text-slate-500">→</span>
               <span className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-600 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20">
-                impossible by construction
+                rejected on every layer
               </span>
             </div>
             <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300 sm:ml-auto sm:max-w-md">
-              No <span className="font-mono">deleteTask</span> is registered, so even if generated code
-              tried to delete via the network, the opaque origin blocks it, the CSP blocks it, and the
-              bridge rejects it. Deletion fails on every layer.
+              No <span className="font-mono">deleteTask</span> is registered, so the scanner refuses the
+              code before it runs, the CSP leaves it no network to reach your API, and the bridge
+              rejects the call. Deletion fails on every layer.
             </p>
           </div>
         </Reveal>
@@ -1063,7 +1075,7 @@ function Developer() {
               ['Typed capability surface', 'Data sources and actions, each described for the model and enforced by id at runtime.'],
               ['Your code stays yours', 'You pass the real implementations. The model never sees them — only the registry.'],
               ['Model-agnostic', 'One endpoint returns { code, reply }. Wire up Gemini, Claude, or anything else.'],
-              ['Persisted per user', 'Generated UI is saved to localStorage and reloaded automatically.'],
+              ['Persisted per user', 'Generated UI is saved under a per-user storage key and reloaded automatically.'],
             ].map(([t, b]) => (
               <li key={t} className="flex gap-3 text-left">
                 <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
@@ -1198,7 +1210,7 @@ function Faq() {
   const qs = [
     [
       'Is the generated code actually safe to run?',
-      'Yes — that’s the core of the product. Generated UI runs in an opaque-origin iframe with no same-origin access, a CSP that blocks all network, and a bridge that only runs actions you registered. Three independent layers, each load-bearing.',
+      'That’s the core of the product. Generated UI runs in an opaque-origin iframe with no same-origin access, a CSP that blocks fetch/XHR/WebSockets and every external resource, and a private-channel bridge that only runs actions you registered with the args you declared. Code is statically scanned before it runs, and if a generation ever navigates the frame or hangs, the canvas is reset and your app is notified. The one thing no browser can prevent is a frame navigating itself, so only push data you would show that user anyway — the SDK docs spell out every residual.',
     ],
     [
       'Do I have to ship my source code?',
@@ -1210,7 +1222,7 @@ function Faq() {
     ],
     [
       'Can a user break something or delete data?',
-      'Only if you registered an action for it. If there is no deleteTask in the registry, no generated UI can delete — by construction. The bridge rejects any unregistered action id.',
+      'Only if you registered an action for it. If there is no deleteTask in the registry, the scanner refuses code that calls it and the bridge rejects the call at runtime. Registered actions are validated against their declared args and rate-limited before your implementation runs.',
     ],
     [
       'How does the waitlist work?',
