@@ -1,0 +1,29 @@
+{
+  "name": "veneer-sdk",
+  "version": "0.1.0",
+  "description": "An MCP for in-app personalization — an open-source React npm package that lets your end users redesign your app's UI with AI, inside a hard security sandbox.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "react",
+    "ai",
+    "personalization",
+    "sandbox",
+    "iframe",
+    "mcp",
+    "ui-generation"
+  ],
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  }
+}

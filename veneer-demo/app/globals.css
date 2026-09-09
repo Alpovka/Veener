@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ink: #0b1020;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Lenis smooth-scroll (omitting the default `iframe { pointer-events:none }`
+   rule so the live sandbox iframe stays fully interactive). */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+/* Whenever Lenis is active, hand all smoothing to it (disable native smooth scroll). */
+html.lenis {
+  scroll-behavior: auto !important;
+}
+.lenis [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+body {
+  background: #ffffff;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.5s ease, color 0.5s ease;
+}
+
+html.dark body {
+  background: #070b18;
+  color: #e2e8f0;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+@layer components {
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(120deg, #c7d2fe 0%, #a78bfa 45%, #6366f1 100%);
+  }
+  .text-gradient-dark {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(120deg, #4338ca 0%, #7c3aed 60%, #4f46e5 100%);
+  }
+
+  /* The animated aurora / gradient mesh used behind the hero + CTA */
+  .aurora {
+    background:
+      radial-gradient(40% 50% at 20% 20%, rgba(99, 102, 241, 0.35), transparent 70%),
+      radial-gradient(40% 50% at 80% 25%, rgba(139, 92, 246, 0.32), transparent 70%),
+      radial-gradient(50% 50% at 50% 90%, rgba(56, 189, 248, 0.18), transparent 70%);
+    background-size: 200% 200%;
+  }
+
+  /* Masked grid background for dark sections */
+  .grid-mask {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 60%, transparent 100%);
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 60%, transparent 100%);
+  }
+  /* Light masked grid for bright sections */
+  .grid-mask-light {
+    background-image:
+      linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, #000 50%, transparent 100%);
+    mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, #000 50%, transparent 100%);
+  }
+
+  /* Glassy card */
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .glass-dark {
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* 3D scene helpers */
+  .scene {
+    perspective: 1400px;
+  }
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+
+  /* Conic gradient border — the padding-box fill follows the theme so the
+     thin bezel matches the section behind it. */
+  .ring-gradient {
+    background:
+      linear-gradient(#fff, #fff) padding-box,
+      conic-gradient(from 180deg, #6366f1, #8b5cf6, #38bdf8, #6366f1) border-box;
+    border: 1px solid transparent;
+  }
+  html.dark .ring-gradient {
+    background:
+      linear-gradient(#0b1020, #0b1020) padding-box,
+      conic-gradient(from 180deg, #6366f1, #8b5cf6, #38bdf8, #6366f1) border-box;
+  }
+}
+
+/* Scroll-reveal initial state (JS toggles .is-visible) */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Thin custom scrollbar for code blocks */
+.code-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+.code-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
