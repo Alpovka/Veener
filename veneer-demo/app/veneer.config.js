@@ -1,5 +1,6 @@
 // The Veneer registry for this demo app: what the AI is allowed to see and do.
-// Note there is NO deleteTask action — so no generated UI can ever delete a task.
+// Note there is NO deleteTask action — so the bridge will refuse any attempt to delete a task.
+// `returns` marks the actions whose return value generated code may see; the rest resolve undefined.
 
 export const registry = {
   dataSources: [
@@ -18,6 +19,7 @@ export const registry = {
     {
       id: 'createTask',
       description: 'Create a new task.',
+      returns: 'The created task.',
       args: [
         { name: 'title', type: 'string', required: true },
         { name: 'status', type: '"todo" | "doing" | "done"', required: false, default: 'todo' },
