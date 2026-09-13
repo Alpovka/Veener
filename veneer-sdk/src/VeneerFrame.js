@@ -22,6 +22,10 @@ import { runBridgeAction, pickRegisteredData, createRateLimiter } from './bridge
  *  4. Generated code calls veneer.action(id, args) → `action` on the port → validated by
  *     bridge.js → real impl → `action-result` back. Host data changes → `data` on the port.
  *
+ * Branding: `init` carries the provider's theme payload (validated tokens, mode, inlined fonts) and
+ * later changes go over the port as `theme` messages. With `autoHeight` the frame reports its
+ * content height (`size` messages) and the iframe is resized, so the canvas flows with the page.
+ *
  * Detection: any `load` after `init` means the frame navigated (the port died with the old
  * document, so it was already cut off). Missed heartbeats mean it navigated to something that
  * never finished loading, or is stuck in a hot loop. Either way we tear down, quarantine the
@@ -39,14 +43,23 @@ export function VeneerFrame({
   readyTimeoutMs = 8000,
   validation = 'on',
   rateLimit,
+  autoHeight = true,
+  minHeight = 240,
+  maxHeight,
 }) {
   const { generation, loaded } = useVeneer();
+  // Remembered across fresh-document remounts so the page does not jump while the new UI boots.
+  const lastHeightRef = useRef(null);
   if (!loaded) {
     return <div className={className} style={Object.assign({ width: '100%', display: 'block' }, style)} aria-busy="true" />;
   }
   return (
     <FrameInstance
       key={generation}
+      autoHeight={autoHeight}
+      minHeight={minHeight}
+      maxHeight={maxHeight}
+      lastHeightRef={lastHeightRef}
       className={className}
       style={style}
       frameSrc={frameSrc}
@@ -74,9 +87,19 @@ function FrameInstance({
   readyTimeoutMs,
   validation,
   rateLimit,
+  autoHeight,
+  minHeight,
+  maxHeight,
+  lastHeightRef,
 }) {
   const ctx = useVeneer();
-  const { ui, registry, actions, data, flagViolation } = ctx;
+  const { ui, registry, actions, data, flagViolation, themePayload } = ctx;
+  const [height, setHeight] = useState(() => (lastHeightRef && lastHeightRef.current) || minHeight);
+  const [clipped, setClipped] = useState(false); // content taller than maxHeight → let the frame scroll
+  const clampHeight = useCallback(
+    (h) => Math.max(minHeight || 0, maxHeight ? Math.min(maxHeight, h) : h),
+    [minHeight, maxHeight]
+  );
   const iframeRef = useRef(null);
   const [attached, setAttached] = useState(false); // iframe gets its document only once listeners exist
   const [dead, setDead] = useState(null); // { reason } once torn down
@@ -102,12 +125,13 @@ function FrameInstance({
   }
 
   // Latest props/context reachable from stable handlers, without a write-during-render.
-  const latest = useRef({ ui, registry, actions, data, onError, onSecurityViolation, flagViolation });
+  const latest = useRef({ ui, registry, actions, data, onError, onSecurityViolation, flagViolation, themePayload });
   useLayoutEffect(() => {
-    latest.current = { ui, registry, actions, data, onError, onSecurityViolation, flagViolation };
+    latest.current = { ui, registry, actions, data, onError, onSecurityViolation, flagViolation, themePayload };
   });
 
   const srcDoc = useMemo(() => (frameSrc ? undefined : buildFrameSrcDoc()), [frameSrc]);
+  const sentThemeRef = useRef(null); // last theme payload delivered to this document
 
   const report = useCallback((err) => {
     const cb = latest.current.onError;
@@ -185,6 +209,14 @@ function FrameInstance({
       if (d.type === 'pong') {
         s.awaitingPong = false;
         s.missed = 0;
+      } else if (d.type === 'size') {
+        if (autoHeight && typeof d.height === 'number' && Number.isFinite(d.height) && d.height >= 0) {
+          const raw = Math.ceil(d.height);
+          const next = clampHeight(raw);
+          if (lastHeightRef) lastHeightRef.current = next;
+          setHeight(next);
+          setClipped(!!maxHeight && raw > maxHeight);
+        }
       } else if (d.type === 'action') {
         const callId = d.callId;
         const reply = (ok, payload) =>
@@ -209,14 +241,14 @@ function FrameInstance({
         violate('scan-violation', { violations: Array.isArray(d.violations) ? d.violations.map(String) : [] });
       }
     },
-    [portSend, report, validation, violate]
+    [portSend, report, validation, violate, autoHeight, clampHeight, lastHeightRef, maxHeight]
   );
 
   const tryInit = useCallback(() => {
     const s = st.current;
     const frame = iframeRef.current;
     if (s.dead || s.inited || !s.ready || s.loadCount < 1 || !frame || !frame.contentWindow) return;
-    const { ui, registry, data } = latest.current;
+    const { ui, registry, data, themePayload } = latest.current;
     const channel = new MessageChannel();
     s.port = channel.port1;
     s.port.onmessage = onPortMessage;
@@ -225,6 +257,7 @@ function FrameInstance({
     s.readyTimer = null;
     const registered = pickRegisteredData(registry, data);
     s.lastSent = registered;
+    sentThemeRef.current = themePayload;
     try {
       // '*' is required: the frame is an opaque origin. The port is what makes this safe — only
       // the document present right now receives it, and it dies with that document.
@@ -237,7 +270,8 @@ function FrameInstance({
           data: registered,
           actionIds: ((registry && registry.actions) || []).map((a) => a.id),
           dataIds: ((registry && registry.dataSources) || []).map((d) => d.id),
-          options: { actionTimeoutMs },
+          options: { actionTimeoutMs, autoHeight: !!autoHeight },
+          theme: themePayload,
         },
         '*',
         [channel.port2]
@@ -264,7 +298,16 @@ function FrameInstance({
       s.awaitingPong = true;
       portSend({ type: 'ping', seq: ++s.pingSeq });
     }, heartbeatMs);
-  }, [onPortMessage, portSend, report, teardown, violate, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats]);
+  }, [onPortMessage, portSend, report, teardown, violate, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, autoHeight]);
+
+  // Push theme changes (mode flip, fonts arriving, host re-branding) into the running frame.
+  useEffect(() => {
+    const s = st.current;
+    if (!s.inited || s.dead) return;
+    if (sentThemeRef.current === themePayload) return;
+    sentThemeRef.current = themePayload;
+    portSend({ type: 'theme', theme: themePayload });
+  }, [themePayload, portSend]);
 
   // Window listener: attached BEFORE the iframe receives a document, so `ready` cannot be missed.
   useLayoutEffect(() => {
@@ -361,8 +404,13 @@ function FrameInstance({
     referrerPolicy: 'no-referrer',
     title: 'Veneer canvas',
     className,
-    style: Object.assign({ width: '100%', border: 'none', display: 'block' }, style),
+    style: Object.assign(
+      { width: '100%', border: 'none', display: 'block' },
+      style,
+      autoHeight ? { height, overflow: clipped ? 'auto' : 'hidden' } : null
+    ),
   };
+  if (autoHeight) frameProps.scrolling = clipped ? 'auto' : 'no';
   if (attached) {
     if (frameSrc) frameProps.src = frameSrc;
     else frameProps.srcDoc = srcDoc;

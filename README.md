@@ -83,6 +83,12 @@ generator endpoint (`createVeneerHandler` from `veneer-sdk/server`) builds the p
 registry, requires same-origin JSON requests, caps sizes, rate-limits, times out the model and scans
 the result. It is not an open LLM proxy.
 
+**Branding.** Pass `theme` to the provider (colours per mode, radii, fonts, shadows) and both the
+generated UI and the chat widget take the host brand: the tokens become `--veneer-*` variables in the
+sandbox, Tailwind utilities like `bg-primary` / `text-foreground` / `rounded-md` resolve to them, the
+model is told to use that vocabulary, fonts are inlined as data URIs, and `autoHeight` lets the canvas
+flow with the page. See `veneer-sdk/README.md` → Branding.
+
 Customizations are **per-user and private**: the generated UI is stored in `localStorage` under a
 key you choose (`storageKey`, e.g. `veneer-ui:<userId>`). No sharing in this version.
 

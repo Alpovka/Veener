@@ -44,6 +44,32 @@ export const registry = {
   ],
 };
 
+// The demo brand, handed to <VeneerProvider theme>. Generated UIs and the chat widget use these
+// tokens (bg-primary, text-foreground, rounded-md, …) instead of hardcoded colours, and follow
+// the site's light/dark toggle. Inter ships from /public/fonts and is inlined into the sandbox.
+export const theme = {
+  colors: {
+    primary: '#4f46e5',
+    primaryForeground: '#ffffff',
+    accent: '#7c3aed',
+    background: { light: '#ffffff', dark: '#0b1020' },
+    surface: { light: '#f8fafc', dark: '#111a2e' },
+    border: { light: '#e2e8f0', dark: '#243047' },
+    foreground: { light: '#0f172a', dark: '#e2e8f0' },
+    muted: { light: '#64748b', dark: '#94a3b8' },
+    success: '#10b981',
+    warning: '#f59e0b',
+    danger: '#e11d48',
+  },
+  radius: { sm: '8px', md: '12px', lg: '18px', full: '9999px' },
+  font: { sans: 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif', size: '14px' },
+  fonts: [
+    { family: 'Inter', src: '/fonts/inter-latin-400-normal.woff2', weight: '400' },
+    { family: 'Inter', src: '/fonts/inter-latin-600-normal.woff2', weight: '600' },
+    { family: 'Inter', src: '/fonts/inter-latin-700-normal.woff2', weight: '700' },
+  ],
+};
+
 export const initialTasks = [
   { id: 't1', title: 'Draft the investor update', status: 'doing', dueDate: '2026-06-18' },
   { id: 't2', title: 'Review pull requests', status: 'todo', dueDate: '2026-06-17' },
@@ -87,21 +113,21 @@ export const defaultUI = `function VeneerUI() {
   }
 
   const stats = [
-    { label: 'Open', value: tasks.length - doneCount, tone: 'text-slate-900' },
+    { label: 'Open', value: tasks.length - doneCount, tone: 'text-foreground' },
     { label: 'In progress', value: inCol('doing').length, tone: 'text-amber-600' },
     { label: 'Done', value: doneCount, tone: 'text-emerald-600' },
-    { label: 'Overdue', value: overdue, tone: overdue ? 'text-rose-600' : 'text-slate-400' },
+    { label: 'Overdue', value: overdue, tone: overdue ? 'text-danger' : 'text-muted' },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 p-5 sm:p-7">
+    <div className="min-h-full bg-background p-5 font-sans text-foreground sm:p-7">
       <div className="mx-auto max-w-4xl">
         {/* Header + quick add */}
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-500">Workspace</div>
-            <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900">Product Sprint</h1>
-            <p className="mt-0.5 text-sm text-slate-500">Week of {fmt(today)} · {tasks.length} active tasks</p>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">Workspace</div>
+            <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">Product Sprint</h1>
+            <p className="mt-0.5 text-sm text-muted">Week of {fmt(today)} · {tasks.length} active tasks</p>
           </div>
           <div className="flex w-full items-center gap-2 sm:w-auto">
             <input
@@ -109,9 +135,9 @@ export const defaultUI = `function VeneerUI() {
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && add()}
               placeholder="Add a task…"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-indigo-400 sm:w-64"
+              className="w-full rounded-md border border-border bg-surface px-4 py-2.5 text-sm text-foreground shadow-sm outline-none focus:ring-2 focus:ring-primary sm:w-64"
             />
-            <button onClick={add} className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
+            <button onClick={add} className="shrink-0 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:opacity-90">
               Add
             </button>
           </div>
@@ -120,34 +146,34 @@ export const defaultUI = `function VeneerUI() {
         {/* Stat cards */}
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {stats.map((s) => (
-            <div key={s.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div key={s.label} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
               <div className={'text-2xl font-bold tracking-tight ' + s.tone}>{s.value}</div>
-              <div className="mt-0.5 text-xs font-medium text-slate-500">{s.label}</div>
+              <div className="mt-0.5 text-xs font-medium text-muted">{s.label}</div>
             </div>
           ))}
         </div>
 
         {/* Completion bar */}
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-500">
+        <div className="mt-5 rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between text-xs font-medium text-muted">
             <span>Sprint completion</span>
-            <span className="text-slate-900">{pct}%</span>
+            <span className="text-foreground">{pct}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500" style={{ width: pct + '%' }} />
+          <div className="h-2 overflow-hidden rounded-full bg-background ring-1 ring-border">
+            <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: pct + '%' }} />
           </div>
         </div>
 
         {/* Board */}
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           {columns.map((col) => (
-            <div key={col.key} className="rounded-2xl bg-slate-100/70 p-3">
+            <div key={col.key} className="rounded-lg border border-border bg-surface p-3">
               <div className="mb-3 flex items-center justify-between px-1">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <span className={'h-2 w-2 rounded-full ' + col.dot} />
                   {col.label}
                 </div>
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500 shadow-sm">
+                <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted shadow-sm">
                   {inCol(col.key).length}
                 </span>
               </div>
@@ -155,19 +181,19 @@ export const defaultUI = `function VeneerUI() {
                 {inCol(col.key).map((t) => {
                   const isOverdue = t.dueDate && t.dueDate < today && t.status !== 'done';
                   return (
-                    <div key={t.id} className="group rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                    <div key={t.id} className="group rounded-md border border-border bg-background p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                       <div className="flex items-start justify-between gap-2">
-                        <div className="text-sm font-medium leading-snug text-slate-800">{t.title}</div>
+                        <div className="text-sm font-medium leading-snug text-foreground">{t.title}</div>
                         <button
                           onClick={() => veneer.action('archiveTask', { id: t.id })}
-                          className="shrink-0 text-slate-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                          className="shrink-0 text-muted opacity-0 transition hover:text-danger group-hover:opacity-100"
                           title="Archive"
                         >
                           ✕
                         </button>
                       </div>
                       {t.dueDate && (
-                        <div className={'mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ' + (isOverdue ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-500')}>
+                        <div className={'mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ' + (isOverdue ? 'bg-rose-50 text-danger' : 'bg-surface text-muted')}>
                           {isOverdue ? 'Overdue · ' : 'Due '}{fmt(t.dueDate)}
                         </div>
                       )}
@@ -176,7 +202,7 @@ export const defaultUI = `function VeneerUI() {
                           <button
                             key={c.key}
                             onClick={() => veneer.action('updateTask', { id: t.id, status: c.key })}
-                            className={'rounded-md px-2 py-1 text-[11px] font-medium transition ' + (t.status === c.key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200')}
+                            className={'rounded-md px-2 py-1 text-[11px] font-medium transition ' + (t.status === c.key ? 'bg-primary text-primary-foreground' : 'bg-surface text-muted hover:text-foreground')}
                           >
                             {c.label}
                           </button>
@@ -186,7 +212,7 @@ export const defaultUI = `function VeneerUI() {
                   );
                 })}
                 {inCol(col.key).length === 0 && (
-                  <div className="rounded-xl border border-dashed border-slate-300 py-6 text-center text-xs text-slate-400">
+                  <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted">
                     Nothing here yet
                   </div>
                 )}

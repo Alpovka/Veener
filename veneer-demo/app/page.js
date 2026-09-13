@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { VeneerProvider, VeneerFrame, VeneerChat, VeneerLogo } from 'veneer-sdk';
-import { registry, initialTasks, defaultUI } from './veneer.config';
+import { registry, initialTasks, defaultUI, theme as brandTheme } from './veneer.config';
+import { useTheme } from './_components/theme';
 import {
   Reveal,
   Tilt,
@@ -67,6 +68,9 @@ export default function Home() {
 
   const data = useMemo(() => ({ tasks }), [tasks]);
   const reload = useCallback(() => setTasks(initialTasks), []);
+  // The canvas and the chat widget follow the site's light/dark toggle.
+  const { theme: siteMode } = useTheme();
+  const veneerTheme = useMemo(() => ({ ...brandTheme, mode: siteMode === 'dark' ? 'dark' : 'light' }), [siteMode]);
 
   return (
     <VeneerProvider
@@ -75,6 +79,8 @@ export default function Home() {
       data={data}
       defaultUI={defaultUI}
       persist="memory"
+      theme={veneerTheme}
+      onThemeError={(e) => console.warn('[veneer] theme:', e)}
       onSecurityViolation={(v) => console.warn('[veneer] sandbox violation:', v.reason, v)}
     >
       <div className="min-h-screen bg-white text-slate-900 dark:bg-[#070b18] dark:text-slate-200">
@@ -650,7 +656,9 @@ function LiveDemo({ reload }) {
               <div className={tab === 'preview' ? '' : 'hidden'}>
                 <VeneerFrame
                   frameSrc="/veneer-frame"
-                  style={{ height: 560, background: '#f8fafc' }}
+                  autoHeight
+                  minHeight={560}
+                  maxHeight={900}
                   onError={(e) => console.warn('[veneer]', e)}
                 />
               </div>
