@@ -92,23 +92,75 @@ export const GET = () => buildFrameResponse({ frameAncestors: "'self'" });
 
 | Export | What it does |
 | --- | --- |
-| `VeneerProvider({ registry, actions, data, defaultUI, persist, storageKey, onSecurityViolation })` | Holds the registry, the real action impls, and live data. Persists the current generated UI (`persist`: `'local'` default, `'session'`, `'memory'`) under `storageKey` (default `veneer-ui`; use a per-user key on shared devices). Stored UIs are tagged with a hash of the registry and ignored if the registry changes. |
-| `VeneerFrame({ frameSrc, onError, onSecurityViolation, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, readyTimeoutMs, validation, rateLimit })` | Renders the sandboxed iframe and runs the bridge. Every UI change mounts a **fresh document**. `frameSrc` loads the sandbox from a URL you serve with `buildFrameResponse()` instead of `srcDoc`. |
+| `VeneerProvider({ registry, actions, data, defaultUI, persist, storageKey, theme, onThemeError, onSecurityViolation })` | Holds the registry, the real action impls, and live data. Persists the current generated UI (`persist`: `'local'` default, `'session'`, `'memory'`) under `storageKey` (default `veneer-ui`; use a per-user key on shared devices). Stored UIs are tagged with a hash of the registry and ignored if the registry changes. |
+| `VeneerFrame({ frameSrc, autoHeight, minHeight, maxHeight, onError, onSecurityViolation, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, readyTimeoutMs, validation, rateLimit })` | Renders the sandboxed iframe and runs the bridge. Every UI change mounts a **fresh document**. `frameSrc` loads the sandbox from a URL you serve with `buildFrameResponse()` instead of `srcDoc`. `autoHeight` sizes the iframe to its content. |
 | `VeneerChat({ endpoint, suggestions, anchor, headers })` | Floating chat. Sends `{ message, history, currentUI }` (never the registry). Shows a notice when a generated UI was reverted for safety. |
 | `useVeneer()` | `{ registry, actions, data, ui, setUi, reset, loaded, defaultUI, generation, violation, flagViolation, restoreQuarantined, clearViolation }`. |
 | `runBridgeAction`, `validateArgs`, `typeChecker`, `pickRegisteredData`, `filterActionResult`, `createRateLimiter`, `BridgeError` | The bridge's validators, exported for testing and custom hosts. |
 | `buildFrameSrcDoc()`, `FRAME_CSP`, `FRAME_SANDBOX`, `RUNTIME_SCRIPTS`, `PROTOCOL_VERSION` | The sandbox document and its policy. |
 | `createScanner(parser, traverse)`, `registryIds(registry)` | The static scanner (see below). |
+| `resolveTheme`, `themeFromCSSVariables`, `loadThemeFonts`, `DEFAULT_THEME`, `THEME_UTILITIES` | Branding helpers (see "Branding"). |
 
 ### `veneer-sdk/server` (no React; Fetch-API `Request`/`Response`)
 
 | Export | What it does |
 | --- | --- |
-| `createVeneerHandler({ registry, generate, rateLimit, allowedOrigins, authorize, onError, maxHistory, maxMessageChars, maxCurrentUIChars, maxBodyBytes, timeoutMs })` | Returns `(request) => Promise<Response>`. Builds the prompt from **your** registry (the client's copy is ignored), requires `Content-Type: application/json` and same-origin Fetch Metadata, caps every input, rate-limits per IP (`rateLimit` may be `{ limit, windowMs }`, an `async (key) => boolean` backed by your store, or `false`), aborts the model call after `timeoutMs`, statically scans the generated code and refuses anything that reaches outside the registry, and never returns provider error text. |
+| `createVeneerHandler({ registry, generate, brand, rateLimit, allowedOrigins, authorize, onError, maxHistory, maxMessageChars, maxCurrentUIChars, maxBodyBytes, timeoutMs })` | Returns `(request) => Promise<Response>`. Builds the prompt from **your** registry (the client's copy is ignored), requires `Content-Type: application/json` and same-origin Fetch Metadata, caps every input, rate-limits per IP (`rateLimit` may be `{ limit, windowMs }`, an `async (key) => boolean` backed by your store, or `false`), aborts the model call after `timeoutMs`, statically scans the generated code and refuses anything that reaches outside the registry, and never returns provider error text. |
 | `buildFrameResponse({ frameAncestors })` | The sandbox document as a `Response` with a header CSP (including `sandbox` and `frame-ancestors`), `Referrer-Policy: no-referrer`. |
 | `scanGeneratedCode(code, registry)` | `{ ok, violations }` for a code string. |
 | `buildSystemPrompt(registry)`, `buildUserPrompt(message, currentUI)`, `extractJson(text)` | Prompt building blocks, if you run your own pipeline. |
 | `checkRequestOrigin(request, opts)`, `createMemoryRateLimiter(opts)`, `clientKey(request)` | Reusable guards for your other routes. |
+
+## Branding
+
+Generated UI and the SDK's widgets take the host's brand. Pass a `theme` to the provider:
+
+```jsx
+<VeneerProvider
+  registry={registry} actions={actions} data={data}
+  theme={{
+    mode: isDark ? 'dark' : 'light',              // or 'system'
+    colors: {
+      primary: '#4f46e5', primaryForeground: '#fff', accent: '#7c3aed',
+      background: { light: '#fff', dark: '#0b1020' },   // any token may differ per mode
+      surface: { light: '#f8fafc', dark: '#111a2e' },
+      border: { light: '#e2e8f0', dark: '#243047' },
+      foreground: { light: '#0f172a', dark: '#e2e8f0' },
+      muted: { light: '#64748b', dark: '#94a3b8' },
+      success: '#10b981', warning: '#f59e0b', danger: '#e11d48',
+    },
+    radius: { sm: '8px', md: '12px', lg: '18px' },
+    font: { sans: 'Inter, ui-sans-serif, system-ui, sans-serif', size: '14px' },
+    fonts: [{ family: 'Inter', src: '/fonts/inter-latin-400-normal.woff2', weight: '400' }],
+  }}
+>
+  <VeneerFrame frameSrc="/veneer-frame" autoHeight minHeight={480} />
+  <VeneerChat />
+</VeneerProvider>
+```
+
+How it works:
+
+- The provider validates the theme (`resolveTheme`), turns it into `--veneer-*` CSS variables for a
+  light and a dark variant, and ships them into the sandbox with `init` and later `theme` messages.
+  Inside the frame, Tailwind's brand utilities map onto those variables, so generated code writes
+  `bg-primary text-primary-foreground rounded-md font-sans` and gets your brand. The system prompt
+  built by `createVeneerHandler` tells the model to use exactly that vocabulary
+  (`THEME_UTILITIES`), and `brand: { name, tone }` adds a sentence about your brand.
+- **Fonts** are fetched by the host page and inlined as `data:` URIs, which the frame's CSP already
+  allows. Nothing else changes in the CSP; a theme can never load a remote resource or inject CSS
+  (colours must be colours, lengths must be lengths, `url(` and braces are rejected).
+- **Dark mode:** `mode: 'system'` follows `prefers-color-scheme`; hosts with a class-based toggle
+  pass `'light'` / `'dark'` explicitly. The chat widget uses the same tokens and flips with it.
+- **Auto-height:** with `autoHeight` (default) the frame reports its content height and the iframe
+  is resized, so the canvas flows with the page instead of scrolling inside a box. `minHeight` and
+  `maxHeight` clamp it; when content exceeds `maxHeight` the frame scrolls.
+- `themeFromCSSVariables({ colors: { primary: '--brand-600' } })` reads tokens you already define
+  as CSS custom properties.
+
+Limits: brand colours do not support Tailwind opacity modifiers (`bg-primary/50`); overlays
+inside the canvas are clipped to the iframe rectangle; the frame cannot use your React components
+(it gets your tokens, not your component library).
 
 ## The in-frame API (what generated code may call)
 

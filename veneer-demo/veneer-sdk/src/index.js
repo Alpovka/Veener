@@ -21,3 +21,12 @@ export {
   PROTOCOL_VERSION,
 } from './frameRuntime';
 export { createScanner, registryIds } from './scan';
+export {
+  DEFAULT_THEME,
+  THEME_UTILITIES,
+  resolveTheme,
+  hashTheme,
+  themeFromCSSVariables,
+  loadThemeFonts,
+  themePayload,
+} from './theme';

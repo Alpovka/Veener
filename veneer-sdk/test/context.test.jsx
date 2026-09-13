@@ -79,6 +79,26 @@ describe('VeneerProvider persistence', () => {
   });
 });
 
+describe('branding', () => {
+  it('exposes resolved theme tokens, mode and the frame payload', () => {
+    const onThemeError = vi.fn();
+    const { ctx } = mount({ persist: 'memory', theme: { mode: 'dark', colors: { primary: '#112233', danger: 'url(x)' }, radius: { md: '14px' } }, onThemeError });
+    expect(ctx().theme.colors.primary).toEqual({ light: '#112233', dark: '#112233' });
+    expect(ctx().theme.radius.md).toBe('14px');
+    expect(ctx().resolvedMode).toBe('dark');
+    expect(ctx().themePayload).toMatchObject({ mode: 'dark', fonts: [] });
+    expect(ctx().themePayload.vars.dark['--veneer-primary']).toBe('#112233');
+    expect(onThemeError).toHaveBeenCalledWith(expect.objectContaining({ type: 'theme-invalid' }));
+    expect(ctx().theme.colors.danger.light).toBe('#ef4444');
+  });
+  it('defaults to the system mode and the default palette', () => {
+    const { ctx } = mount({ persist: 'memory' });
+    expect(['light', 'dark']).toContain(ctx().resolvedMode);
+    expect(ctx().theme.mode).toBe('system');
+    expect(ctx().themePayload.vars.light['--veneer-primary']).toBe('#4f46e5');
+  });
+});
+
 describe('violations', () => {
   it('quarantines the offending code, reverts to the default UI in a new generation and reports', () => {
     const onSecurityViolation = vi.fn();

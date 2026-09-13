@@ -1,5 +1,6 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { resolveTheme, loadThemeFonts, themePayload as buildThemePayload } from './theme';
 
 /**
  * The Veneer context exposes, to every Veneer component:
@@ -9,6 +10,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
  *  - ui:         the current generated UI (a self-contained component, as a code string)
  *  - generation: bumps whenever the UI must be re-mounted in a FRESH sandbox document
  *  - violation:  the last security violation (frame navigated / unresponsive / failed the scan), if any
+ *  - theme / resolvedMode / themePayload: the host brand (see theme.js) as validated tokens, the
+ *                current light/dark mode, and the payload the frame receives
  *  - setUi / reset / flagViolation / restoreQuarantined
  *
  * Persistence (`persist` prop): 'local' (default) → localStorage; 'session' → sessionStorage;
@@ -82,6 +85,8 @@ export function VeneerProvider({
   persist = 'local',
   storageKey = 'veneer-ui',
   onSecurityViolation,
+  theme: themeProp,
+  onThemeError,
   children,
 }) {
   const [ui, setUiState] = useState(defaultUI);
@@ -91,6 +96,64 @@ export function VeneerProvider({
   const violationTimes = useRef([]);
   const registryHash = useMemo(() => hashRegistry(registry), [registry]);
   const quarantineKey = storageKey + ':quarantine';
+
+  // ---- Branding ------------------------------------------------------------------------------
+  // Resolve by value so hosts can pass an inline object without re-triggering work every render.
+  const themeKey = useMemo(() => JSON.stringify(themeProp || {}), [themeProp]);
+  const resolvedTheme = useMemo(() => resolveTheme(themeProp), [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (resolvedTheme.problems.length && typeof onThemeError === 'function') {
+      try {
+        onThemeError({ type: 'theme-invalid', problems: resolvedTheme.problems });
+      } catch (e) {
+        /* ignore */
+      }
+    }
+  }, [resolvedTheme, onThemeError]);
+
+  const [systemDark, setSystemDark] = useState(false);
+  useEffect(() => {
+    if (resolvedTheme.theme.mode !== 'system' || typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(!!mq.matches);
+    update();
+    if (mq.addEventListener) mq.addEventListener('change', update);
+    else mq.addListener(update);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', update);
+      else mq.removeListener(update);
+    };
+  }, [resolvedTheme.theme.mode]);
+  const resolvedMode = resolvedTheme.theme.mode === 'system' ? (systemDark ? 'dark' : 'light') : resolvedTheme.theme.mode;
+
+  const [themeFonts, setThemeFonts] = useState([]);
+  const fontsKey = useMemo(() => JSON.stringify(resolvedTheme.theme.fonts), [resolvedTheme]);
+  useEffect(() => {
+    let cancelled = false;
+    const fonts = resolvedTheme.theme.fonts;
+    if (!fonts.length) {
+      setThemeFonts([]);
+      return undefined;
+    }
+    loadThemeFonts(fonts, {
+      onError: (e) => {
+        if (typeof onThemeError === 'function') {
+          try {
+            onThemeError(e);
+          } catch (err) {
+            /* ignore */
+          }
+        }
+      },
+    }).then((loaded) => {
+      if (!cancelled) setThemeFonts(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fontsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const themePayload = useMemo(() => buildThemePayload(resolvedTheme, resolvedMode, themeFonts), [resolvedTheme, resolvedMode, themeFonts]);
 
   // Hydrate from the chosen store (if any) on mount. In 'memory' mode this just flips `loaded`.
   useEffect(() => {
@@ -208,6 +271,11 @@ export function VeneerProvider({
     restoreQuarantined,
     clearViolation,
     storageKey,
+    theme: resolvedTheme.theme,
+    themeVars: resolvedTheme.vars,
+    resolvedMode,
+    themeFonts,
+    themePayload,
   };
   return <VeneerContext.Provider value={value}>{children}</VeneerContext.Provider>;
 }

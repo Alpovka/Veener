@@ -12,6 +12,7 @@ import * as parser from '@babel/parser';
 import traverseNs from '@babel/traverse';
 import { createScanner, registryIds } from '../scan.js';
 import { buildFrameHtml, FRAME_CSP, FRAME_SANDBOX } from '../frameRuntime.js';
+import { THEME_UTILITIES } from '../theme.js';
 
 const traverse = typeof traverseNs === 'function' ? traverseNs : traverseNs.default;
 const scan = createScanner(parser, traverse);
@@ -106,13 +107,14 @@ function sanitizeHistory(history, { maxHistory, maxHistoryTurnChars }) {
  * @param {string[]} [opts.allowedOrigins]  extra Origins allowed to call the endpoint (cross-origin embeds)
  * @param {(req: Request) => Promise<boolean>|boolean} [opts.authorize]  return false to reject with 401
  * @param {(err: unknown, ctx: object) => void} [opts.onError]  server-side logger (errors are never sent to clients)
+ * @param {{ name?: string, tone?: string }} [opts.brand]  optional words about the brand for the prompt (token values stay on the client)
  */
 export function createVeneerHandler(opts) {
   if (!opts || !opts.registry) throw new Error('createVeneerHandler: `registry` is required');
   if (typeof opts.generate !== 'function') throw new Error('createVeneerHandler: `generate` is required');
   const o = { ...DEFAULT_HANDLER_OPTIONS, ...opts };
   const registry = o.registry;
-  const system = buildSystemPrompt(registry);
+  const system = buildSystemPrompt(registry, { brand: o.brand });
   const ids = registryIds(registry);
   const log = typeof o.onError === 'function' ? o.onError : () => {};
   let allow;
@@ -233,8 +235,12 @@ export function buildFrameResponse({ frameAncestors = "'self'" } = {}) {
   });
 }
 
-export function buildSystemPrompt(registry) {
+export function buildSystemPrompt(registry, { brand } = {}) {
   const reg = JSON.stringify(registry || {}, null, 2);
+  const u = THEME_UTILITIES;
+  const brandLine = brand && (brand.name || brand.tone)
+    ? `\nThe host brand${brand.name ? ` is "${String(brand.name).slice(0, 80)}"` : ''}${brand.tone ? `; its tone is ${String(brand.tone).slice(0, 200)}` : ''}.`
+    : '';
   return `You are Veneer, a UI generator embedded in a host web application. The end user will
 describe how they want the current page to look, and you generate the UI for it.
 
@@ -271,6 +277,19 @@ CAPABILITY RULES (this is the contract — follow it exactly):
   record when no delete action is registered), DO NOT invent it and DO NOT fake it. Instead, set
   "code" to null (keep the current UI), and in "reply" politely explain that the action isn't
   available in this app, naming what you can do instead.
+
+BRAND (the sandbox is themed by the host app — make the UI look like part of it):${brandLine}
+- Use these brand utilities for chrome and structure; they resolve to the host's own colours, radii and fonts:
+  surfaces: ${u.surfaces.join(', ')}
+  text: ${u.text.join(', ')}
+  borders: ${u.borders.join(', ')}
+  radius: ${u.radius.join(', ')}   fonts: ${u.fonts.join(', ')}   shadows: ${u.shadows.join(', ')}
+- Page background: bg-background. Cards/panels: bg-surface border border-border rounded-lg shadow-sm.
+  Primary buttons: bg-primary text-primary-foreground rounded-md. Body text: text-foreground; secondary: text-muted.
+- Brand colours do not support opacity modifiers (no bg-primary/50). Never hardcode hex colours or inline colour styles.
+- Raw Tailwind palette colours (e.g. bg-emerald-100) are fine for data-visualisation accents, status chips and
+  when the user explicitly asks for a colourful design; otherwise prefer the brand utilities.
+- The canvas is auto-sized to its content: do not use min-h-screen or fixed viewport heights.
 
 REGISTERED CAPABILITIES:
 ${reg}

@@ -40,4 +40,18 @@ describe('frame document', () => {
     expect(m[1]).toContain('ev.source !== window.parent');
     expect(m[1]).toContain("'use strict'");
   });
+  it('applies host branding without widening the CSP', () => {
+    const m = html.match(/<script>([\s\S]*)<\/script>\s*<\/body>/)[1];
+    expect(m).toContain('function applyTheme');
+    expect(m).toContain("d.type === 'theme'");
+    expect(m).toContain("type: 'size'");
+    expect(m).toContain('window.tailwind.config');
+    expect(m).toContain("primary: { DEFAULT: 'var(--veneer-primary)'");
+    expect(m).toContain("darkMode: 'class'");
+    // theme values are re-validated inside the frame
+    expect(m).toMatch(/function safeCssValue/);
+    expect(m).toContain('@font-face');
+    expect(FRAME_CSP).toContain("font-src data:");
+    expect(FRAME_CSP).not.toContain('fonts.gstatic');
+  });
 });

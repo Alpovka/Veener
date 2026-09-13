@@ -44,6 +44,9 @@ const server = http.createServer(async (req, res) => {
     const r = buildFrameResponse({ frameAncestors: "'self'" });
     res.writeHead(r.status, Object.fromEntries(r.headers));
     res.end(await r.text());
+  } else if (url.pathname === '/fonts/test.woff2') {
+    res.writeHead(200, { 'content-type': 'font/woff2' });
+    res.end(readFileSync(resolve(root, 'node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2')));
   } else if (url.pathname === '/steal') {
     steals.push(url.search);
     res.writeHead(200, { 'content-type': 'text/html' });
@@ -143,6 +146,59 @@ for (const mode of ['srcdoc', 'url']) {
     check(`[${mode}] default UI is back after the violation`, (await frameLoc.locator('#count').textContent()) === '2');
   } catch (e) {
     check(`[${mode}] scenario threw`, false, e.message.split('\n')[0]);
+  }
+  await context.close();
+}
+
+// Branding: theme tokens, dark mode, inlined font and auto-height.
+for (const dark of ['0', '1']) {
+  const { context, page } = await newPage();
+  await page.goto(`${base}/?mode=url&dark=${dark}&autoheight=1`);
+  const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
+  try {
+    await frameLoc.locator('#brand').waitFor({ timeout: 15000 });
+    const f = veneerFrame(page);
+    const probe = await f.evaluate(() => {
+      const el = document.getElementById('brand');
+      const cs = getComputedStyle(el);
+      return {
+        primaryVar: getComputedStyle(document.documentElement).getPropertyValue('--veneer-primary').trim(),
+        bg: cs.backgroundColor, color: cs.color, radius: cs.borderTopLeftRadius,
+        dark: document.documentElement.classList.contains('dark'),
+        bodyFont: getComputedStyle(document.body).fontFamily,
+        fontFace: !!document.getElementById('veneer-theme') && document.getElementById('veneer-theme').textContent.includes('@font-face'),
+        fontLoaded: document.fonts ? document.fonts.check('12px VeneerTestFont') : 'n/a',
+        pageBg: getComputedStyle(document.documentElement).getPropertyValue('--veneer-background').trim(),
+        // The Tailwind Play CDN is stubbed in this harness (not reachable from the runner), so the
+        // utility→variable mapping is asserted structurally; the variables themselves are asserted live.
+        twPrimary: window.tailwind && window.tailwind.config && window.tailwind.config.theme.extend.colors.primary.DEFAULT,
+        twRadius: window.tailwind && window.tailwind.config && window.tailwind.config.theme.extend.borderRadius.md,
+        twDark: window.tailwind && window.tailwind.config && window.tailwind.config.darkMode,
+      };
+    });
+    check(`[dark=${dark}] Tailwind brand utilities map onto the variables`, probe.twPrimary === 'var(--veneer-primary)' && probe.twRadius === 'var(--veneer-radius-md)' && probe.twDark === 'class', JSON.stringify([probe.twPrimary, probe.twRadius, probe.twDark]));
+    check(`[dark=${dark}] brand variable reaches the frame`, probe.primaryVar === '#0f766e', probe.primaryVar);
+    check(`[dark=${dark}] --veneer-primary resolves to the brand colour`, probe.bg === 'rgb(15, 118, 110)', probe.bg);
+    check(`[dark=${dark}] --veneer-primary-foreground resolves`, probe.color === 'rgb(255, 255, 255)', probe.color);
+    check(`[dark=${dark}] --veneer-radius-md is the brand radius`, probe.radius === '2px', probe.radius);
+    check(`[dark=${dark}] dark class follows the host mode`, probe.dark === (dark === '1'), String(probe.dark));
+    check(`[dark=${dark}] per-mode background variable`, probe.pageBg === (dark === '1' ? '#101418' : '#fffdf7'), probe.pageBg);
+    check(`[dark=${dark}] body font uses the brand stack`, /VeneerTestFont/.test(probe.bodyFont), probe.bodyFont);
+    // the font arrives asynchronously (fetched by the host, then pushed as a theme update)
+    await f.waitForFunction(() => document.getElementById('veneer-theme') && document.getElementById('veneer-theme').textContent.includes('@font-face'), null, { timeout: 8000 }).catch(() => {});
+    const fontState = await f.evaluate(async () => { try { await document.fonts.ready; } catch (e) {} return { face: document.getElementById('veneer-theme').textContent.includes('@font-face'), loaded: document.fonts.check('12px VeneerTestFont') }; });
+    check(`[dark=${dark}] host font is inlined as a data: URI @font-face`, fontState.face === true, JSON.stringify(fontState));
+    check(`[dark=${dark}] inlined font is usable`, fontState.loaded === true, JSON.stringify(fontState));
+    const h1 = await page.evaluate(() => document.querySelector('iframe[title="Veneer canvas"]').getBoundingClientRect().height);
+    await frameLoc.locator('#add').click();
+    await frameLoc.locator('#add').click();
+    await page.waitForFunction((prev) => document.querySelector('iframe[title="Veneer canvas"]').getBoundingClientRect().height > prev + 500, h1, { timeout: 8000 }).catch(() => {});
+    const h2 = await page.evaluate(() => document.querySelector('iframe[title="Veneer canvas"]').getBoundingClientRect().height);
+    check(`[dark=${dark}] auto-height grows the iframe with its content`, h2 > h1 + 500, `${h1} → ${h2}`);
+    const themeErrors = (await events(page)).filter((e) => e.kind === 'theme-error');
+    check(`[dark=${dark}] no theme errors`, themeErrors.length === 0, JSON.stringify(themeErrors));
+  } catch (e) {
+    check(`[dark=${dark}] branding scenario threw`, false, e.message.split('\n')[0]);
   }
   await context.close();
 }

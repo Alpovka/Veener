@@ -23,6 +23,11 @@ import { createScanner } from './scan.js';
  *     channel to the host. The host additionally treats any post-init `load` event or missed
  *     heartbeats as a violation and tears the frame down (see VeneerFrame.js).
  *
+ *  Branding: the host sends validated theme tokens (theme.js) in `init` and in later `theme`
+ *  messages; the runtime writes them as `--veneer-*` variables, maps Tailwind brand utilities
+ *  onto them, inlines host fonts as data: URIs, and reports its height for auto-sizing. None of
+ *  this widens the CSP.
+ *
  *  4. Static scan before eval. `createScanner` (scan.js) rejects code that touches
  *     window/document/location/network globals, `this`, imports, or unregistered ids. Lint +
  *     speed bump, not a boundary (see scan.js).
@@ -96,6 +101,71 @@ const RUNTIME = `
   var options = {};
   var MAX_PENDING = 64;
   var MAX_CODE_CHARS = 200000;
+
+  // ---- Branding: host theme → CSS variables → Tailwind brand utilities -------------------
+  // Values were validated on the host (theme.js); we still refuse anything that could load a
+  // resource or break out of a declaration.
+  function safeCssValue(v) {
+    return typeof v === 'string' && v.length <= 400 && !/url\\s*\\(|expression\\s*\\(|[;{}<>\\\\]|@import/i.test(v);
+  }
+  function applyTheme(t) {
+    if (!t || typeof t !== 'object') return;
+    var vars = t.vars || {};
+    var css = '';
+    ['light', 'dark'].forEach(function (mode) {
+      var set = vars[mode] || {};
+      var decl = '';
+      Object.keys(set).forEach(function (k) {
+        if (/^--veneer-[a-z0-9-]+$/.test(k) && safeCssValue(set[k])) decl += k + ':' + set[k] + ';';
+      });
+      css += (mode === 'dark' ? ':root.dark{' : ':root{') + decl + '}';
+    });
+    (t.fonts || []).forEach(function (f) {
+      if (!f || typeof f.dataUri !== 'string' || f.dataUri.indexOf('data:font/') !== 0 && f.dataUri.indexOf('data:application/') !== 0) return;
+      if (!/^[\\w\\s'"-]{1,80}$/.test(String(f.family)) || !/^\\d{3}(\\s\\d{3})?$/.test(String(f.weight || '400')) || !/^(normal|italic|oblique)$/.test(String(f.style || 'normal'))) return;
+      var fmt = /^(woff2|woff|truetype|opentype)$/.test(String(f.format)) ? f.format : 'woff2';
+      css += '@font-face{font-family:"' + String(f.family).replace(/"/g, '') + '";font-weight:' + f.weight + ';font-style:' + f.style + ';font-display:swap;src:url(' + f.dataUri + ') format("' + fmt + '");}';
+    });
+    css += 'body{color:var(--veneer-foreground);font-family:var(--veneer-font-sans);font-size:var(--veneer-font-size);}';
+    var el = document.getElementById('veneer-theme');
+    if (!el) { el = document.createElement('style'); el.id = 'veneer-theme'; document.head.appendChild(el); }
+    el.textContent = css;
+    document.documentElement.classList.toggle('dark', t.mode === 'dark');
+    scheduleSize();
+  }
+  // Brand utilities map onto the variables, so bg-primary is whatever the host says it is.
+  if (window.tailwind) {
+    window.tailwind.config = {
+      darkMode: 'class',
+      corePlugins: { preflight: true },
+      theme: { extend: {
+        colors: {
+          background: 'var(--veneer-background)', surface: 'var(--veneer-surface)', border: 'var(--veneer-border)',
+          foreground: 'var(--veneer-foreground)', muted: 'var(--veneer-muted)',
+          primary: { DEFAULT: 'var(--veneer-primary)', foreground: 'var(--veneer-primary-foreground)' },
+          accent: 'var(--veneer-accent)', success: 'var(--veneer-success)', warning: 'var(--veneer-warning)', danger: 'var(--veneer-danger)'
+        },
+        borderRadius: { sm: 'var(--veneer-radius-sm)', DEFAULT: 'var(--veneer-radius-md)', md: 'var(--veneer-radius-md)', lg: 'var(--veneer-radius-lg)', full: 'var(--veneer-radius-full)' },
+        fontFamily: { sans: ['var(--veneer-font-sans)'], mono: ['var(--veneer-font-mono)'] },
+        boxShadow: { sm: 'var(--veneer-shadow-sm)', DEFAULT: 'var(--veneer-shadow-md)', md: 'var(--veneer-shadow-md)' }
+      } }
+    };
+  }
+
+  // ---- Auto-height: report the document height so the host can size the iframe ------------
+  var sizeRaf = 0, lastHeight = -1;
+  function scheduleSize() {
+    if (sizeRaf) return;
+    sizeRaf = requestAnimationFrame(function () {
+      sizeRaf = 0;
+      var h = Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0));
+      if (h !== lastHeight) { lastHeight = h; send({ type: 'size', height: h }); }
+    });
+  }
+  if (window.ResizeObserver) {
+    new ResizeObserver(scheduleSize).observe(document.documentElement);
+    new ResizeObserver(scheduleSize).observe(document.body);
+  }
 
   function send(msg) {
     if (!port) return;
@@ -228,6 +298,8 @@ const RUNTIME = `
       }
     } else if (d.type === 'ping') {
       send({ type: 'pong', seq: d.seq });
+    } else if (d.type === 'theme') {
+      applyTheme(d.theme);
     }
   }
 
@@ -244,8 +316,10 @@ const RUNTIME = `
     dataIds = Array.isArray(d.dataIds) ? d.dataIds : [];
     options = d.options || {};
     dataCache = d.data || {};
+    if (d.theme) applyTheme(d.theme);
     runCode(d.code);
     send({ type: 'started' });
+    scheduleSize();
   }
   window.addEventListener('message', onInit);
 
@@ -266,7 +340,7 @@ export function buildFrameSrcDoc() {
 <meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}" />
 <meta name="referrer" content="no-referrer" />
 ${scriptTags()}
-<style>html,body{margin:0;padding:0;background:transparent;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}</style>
+<style>html,body{margin:0;padding:0;background:transparent;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}html{height:auto;}</style>
 </head>
 <body>
 <div id="root"></div>

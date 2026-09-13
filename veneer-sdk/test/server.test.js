@@ -148,6 +148,25 @@ describe('createVeneerHandler', () => {
   });
 });
 
+describe('buildSystemPrompt branding', () => {
+  it('tells the model about the brand utilities and optional brand words', () => {
+    const p = buildSystemPrompt(registry, { brand: { name: 'Acme Ops', tone: 'calm and precise' } });
+    expect(p).toContain('BRAND');
+    expect(p).toContain('bg-primary text-primary-foreground');
+    expect(p).toContain('text-muted');
+    expect(p).toContain('"Acme Ops"');
+    expect(p).toContain('calm and precise');
+    expect(p).toContain('min-h-screen');
+    expect(buildSystemPrompt(registry)).not.toContain('The host brand');
+  });
+  it('is passed through createVeneerHandler({ brand })', async () => {
+    const generate = vi.fn(async () => JSON.stringify({ code: null, reply: 'ok' }));
+    const h = createVeneerHandler({ registry, generate, rateLimit: false, brand: { name: 'Acme' } });
+    await h(req({ message: 'x' }));
+    expect(generate.mock.calls[0][0].system).toContain('"Acme"');
+  });
+});
+
 describe('buildFrameResponse', () => {
   it('serves the frame with a header CSP including sandbox and frame-ancestors', async () => {
     const res = buildFrameResponse({ frameAncestors: 'https://app.example' });

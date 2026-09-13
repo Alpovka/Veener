@@ -25,6 +25,7 @@ const NAV = [
     group: 'Reference',
     items: [
       ['Components', 'components'],
+      ['Branding', 'branding'],
       ['Security model', 'security'],
     ],
   },
@@ -279,6 +280,22 @@ export default function DocsPage() {
               </div>
             </section>
 
+            <section className="mt-12">
+              <H id="branding">Branding</H>
+              <P>
+                Pass a <Ic>theme</Ic> to <Ic>VeneerProvider</Ic> and both the generated UI and the chat
+                widget take your brand: colours (per light/dark mode), radii, fonts and shadows become{' '}
+                <Ic>--veneer-*</Ic> variables inside the sandbox, and Tailwind utilities such as{' '}
+                <Ic>bg-primary</Ic>, <Ic>text-foreground</Ic>, <Ic>border-border</Ic> and{' '}
+                <Ic>rounded-md</Ic> resolve to them. The model is told to use exactly that vocabulary.
+              </P>
+              <P>
+                Fonts are fetched by your page and inlined into the frame as data URIs, so the sandbox
+                CSP does not change. With <Ic>autoHeight</Ic> the canvas sizes itself to its content and
+                flows with the page. Pass <Ic>mode: 'system'</Ic> to follow the OS, or{' '}
+                <Ic>'light'</Ic> / <Ic>'dark'</Ic> to follow your own toggle — this page does the latter.
+              </P>
+            </section>
             <section className="mt-12">
               <H id="security">Security model</H>
               <P>Three independent layers, none of which depend on the model behaving, plus a static scan and a watchdog:</P>

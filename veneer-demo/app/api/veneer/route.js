@@ -40,5 +40,6 @@ export const POST = createVeneerHandler({
   registry,
   generate,
   rateLimit: { limit: 20, windowMs: 60000 },
+  brand: { name: 'Veneer', tone: 'clean, modern, quietly confident' },
   onError: (err, ctx) => console.error('[veneer]', err && err.message ? err.message : err, ctx),
 });

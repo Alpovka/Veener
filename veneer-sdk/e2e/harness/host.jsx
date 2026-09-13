@@ -17,6 +17,8 @@ export const DEFAULT_UI = `function VeneerUI() {
   return (
     <div>
       <div id="count">{tasks.length}</div>
+      <div id="brand" className="bg-primary text-primary-foreground rounded-md" style={{ background: 'var(--veneer-primary)', color: 'var(--veneer-primary-foreground)', borderRadius: 'var(--veneer-radius-md)' }}>brand</div>
+      <div id="grow" style={{ height: tasks.length > 2 ? 900 : 10 }} />
       <div id="last">{last}</div>
       <button id="add" onClick={add}>add</button>
       <button id="bad" onClick={() => veneer.action('archiveTask', { id: 42 }).catch((e) => setLast('rejected: ' + e.message))}>bad args</button>
@@ -36,6 +38,14 @@ function Probe() {
 function App() {
   const params = new URLSearchParams(location.search);
   const mode = params.get('mode') || 'srcdoc';
+  const dark = params.get('dark') === '1';
+  const theme = {
+    mode: dark ? 'dark' : 'light',
+    colors: { primary: '#0f766e', primaryForeground: '#ffffff', accent: '#0f766e', background: { light: '#fffdf7', dark: '#101418' } },
+    radius: { md: '2px' },
+    font: { sans: 'VeneerTestFont, ui-sans-serif, sans-serif' },
+    fonts: [{ family: 'VeneerTestFont', src: '/fonts/test.woff2', weight: '400' }],
+  };
   const [tasks, setTasks] = useState([{ id: 't1', title: 'one' }]);
   const actions = useMemo(
     () => ({
@@ -60,6 +70,8 @@ function App() {
       data={data}
       defaultUI={DEFAULT_UI}
       persist="memory"
+      theme={theme}
+      onThemeError={(e) => window.__events.push({ kind: 'theme-error', ...e })}
       onSecurityViolation={(v) => window.__events.push({ kind: 'violation', reason: v.reason })}
     >
       <Probe />
@@ -67,7 +79,9 @@ function App() {
         frameSrc={mode === 'url' ? '/veneer-frame' : undefined}
         heartbeatMs={500}
         maxMissedHeartbeats={3}
-        style={{ height: 300 }}
+        autoHeight={params.get('autoheight') === '1'}
+        minHeight={120}
+        style={params.get('autoheight') === '1' ? undefined : { height: 300 }}
         onError={(e) => window.__events.push({ kind: 'error', ...e })}
         onSecurityViolation={(v) => window.__events.push({ kind: 'frame-violation', reason: v.reason })}
       />

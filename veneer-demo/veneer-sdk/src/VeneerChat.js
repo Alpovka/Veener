@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useVeneer } from './context';
 
 const MAX_HISTORY_TURNS = 20;
@@ -13,10 +13,12 @@ const MAX_HISTORY_TURNS = 20;
  * where it is statically scanned before evaluation, and every action it triggers is validated by
  * the bridge — this component never has to trust the endpoint.
  *
- * Styled with inline styles so the package carries no dependency on the host app's CSS / Tailwind.
+ * Styled with inline styles derived from the provider's theme tokens (see theme.js), so the widget
+ * carries the host brand and follows its light/dark mode without depending on the host's CSS.
  */
 export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'viewport', headers }) {
-  const { ui, setUi, reset, violation, clearViolation } = useVeneer();
+  const { ui, setUi, reset, violation, clearViolation, theme, resolvedMode } = useVeneer();
+  const S = useMemo(() => makeStyles(theme, resolvedMode === 'dark'), [theme, resolvedMode]);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [history, setHistory] = useState([]);
@@ -115,7 +117,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
         <div style={panelStyle} role="dialog" aria-label="Veneer AI chat">
           {/* Scoped so the input placeholder stays legible regardless of the host page's
               inherited text color (e.g. a dark-mode body color leaking in). */}
-          <style>{`.veneer-chat-input::placeholder{color:#94a3b8;opacity:1;}`}</style>
+          <style>{`.veneer-chat-input::placeholder{color:${S.placeholderColor};opacity:0.8;}`}</style>
           <div style={S.header}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <SparkleIcon />
@@ -125,7 +127,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
               <button
                 onClick={clearConversation}
                 disabled={busy}
-                style={ghostStyle(busy)}
+                style={ghostStyle(S, busy)}
                 title="Clear the conversation"
               >
                 Clear
@@ -133,7 +135,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
               <button
                 onClick={reset}
                 disabled={busy}
-                style={ghostStyle(busy)}
+                style={ghostStyle(S, busy)}
                 title="Reset the canvas to the default view"
               >
                 Reset
@@ -146,7 +148,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
 
           <div ref={scrollRef} data-lenis-prevent style={S.messages}>
             {history.length === 0 && (
-              <div style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
+              <div style={S.intro}>
                 Describe how you want this page to look. The AI writes the UI; it can only use
                 the capabilities this app registered.
                 <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -236,7 +238,7 @@ function SparkleIcon() {
 }
 
 // Ghost button style with a disabled (busy) appearance.
-function ghostStyle(disabled) {
+function ghostStyle(S, disabled) {
   return {
     ...S.ghostBtn,
     opacity: disabled ? 0.45 : 1,
@@ -244,126 +246,145 @@ function ghostStyle(disabled) {
   };
 }
 
-const S = {
-  launcher: {
-    position: 'fixed',
-    right: 24,
-    bottom: 24,
-    zIndex: 2147483000,
-    display: 'inline-flex',
-    alignItems: 'center',
-    padding: '12px 18px',
-    borderRadius: 9999,
-    border: 'none',
-    background: 'linear-gradient(135deg,#4f46e5,#9333ea)',
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
-    boxShadow: '0 10px 30px rgba(79,70,229,0.35)',
-    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-  },
-  panel: {
-    position: 'fixed',
-    right: 24,
-    bottom: 24,
-    zIndex: 2147483000,
-    width: 380,
-    maxWidth: 'calc(100vw - 32px)',
-    height: 560,
-    maxHeight: 'calc(100vh - 48px)',
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#fff',
-    borderRadius: 18,
-    boxShadow: '0 20px 60px rgba(15,23,42,0.25)',
-    border: '1px solid #e2e8f0',
-    overflow: 'hidden',
-    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 14px',
-    borderBottom: '1px solid #eef2f7',
-    color: '#4f46e5',
-  },
-  messages: { flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 8 },
-  userMsg: {
-    alignSelf: 'flex-end',
-    background: '#4f46e5',
-    color: '#fff',
-    padding: '8px 12px',
-    borderRadius: '14px 14px 4px 14px',
-    fontSize: 13,
-    maxWidth: '85%',
-  },
-  aiMsg: {
-    alignSelf: 'flex-start',
-    background: '#f1f5f9',
-    color: '#0f172a',
-    padding: '8px 12px',
-    borderRadius: '14px 14px 14px 4px',
-    fontSize: 13,
-    maxWidth: '85%',
-    whiteSpace: 'pre-wrap',
-  },
-  notice: {
-    alignSelf: 'stretch',
-    background: '#fff7ed',
-    border: '1px solid #fed7aa',
-    color: '#9a3412',
-    padding: '8px 12px',
-    borderRadius: 10,
-    fontSize: 12.5,
-    lineHeight: 1.5,
-  },
-  suggestion: {
-    textAlign: 'left',
-    background: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: 10,
-    padding: '8px 10px',
-    fontSize: 12.5,
-    color: '#334155',
-    cursor: 'pointer',
-  },
-  inputRow: { display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #eef2f7' },
-  input: {
-    flex: 1,
-    border: '1px solid #e2e8f0',
-    borderRadius: 10,
-    padding: '10px 12px',
-    fontSize: 13,
-    outline: 'none',
-    background: '#fff',
-    color: '#0f172a',
-  },
-  sendBtn: {
-    background: 'linear-gradient(135deg,#4f46e5,#9333ea)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    padding: '0 16px',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  ghostBtn: {
-    background: 'transparent',
-    border: '1px solid #e2e8f0',
-    borderRadius: 8,
-    padding: '4px 8px',
-    fontSize: 12,
-    color: '#64748b',
-    cursor: 'pointer',
-  },
-  iconBtn: {
-    background: 'transparent',
-    border: 'none',
-    fontSize: 14,
-    color: '#94a3b8',
-    cursor: 'pointer',
-  },
-};
+/** Build the widget styles from the resolved theme tokens. */
+function makeStyles(t, dark) {
+  const c = (name) => (t && t.colors && t.colors[name] ? t.colors[name][dark ? 'dark' : 'light'] : undefined);
+  const primary = c('primary');
+  const accent = c('accent');
+  const brandGradient = accent && accent !== primary ? `linear-gradient(135deg, ${primary}, ${accent})` : primary;
+  const font = t && t.font ? t.font.sans : 'ui-sans-serif, system-ui, sans-serif';
+  const radius = (k) => (t && t.radius && t.radius[k]) || '10px';
+  const shadow = (k) => (t && t.shadow && t.shadow[k]) || 'none';
+  const mix = (color, pct, base) => `color-mix(in srgb, ${color} ${pct}%, ${base})`;
+  return {
+    placeholderColor: c('muted'),
+    launcher: {
+      position: 'fixed',
+      right: 24,
+      bottom: 24,
+      zIndex: 2147483000,
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '12px 18px',
+      borderRadius: radius('full'),
+      border: 'none',
+      background: brandGradient,
+      color: c('primaryForeground'),
+      fontSize: 14,
+      fontWeight: 600,
+      cursor: 'pointer',
+      boxShadow: shadow('md'),
+      fontFamily: font,
+    },
+    panel: {
+      position: 'fixed',
+      right: 24,
+      bottom: 24,
+      zIndex: 2147483000,
+      width: 380,
+      maxWidth: 'calc(100vw - 32px)',
+      height: 560,
+      maxHeight: 'calc(100vh - 48px)',
+      display: 'flex',
+      flexDirection: 'column',
+      background: c('background'),
+      color: c('foreground'),
+      borderRadius: radius('lg'),
+      boxShadow: shadow('md'),
+      border: `1px solid ${c('border')}`,
+      overflow: 'hidden',
+      fontFamily: font,
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 14px',
+      borderBottom: `1px solid ${c('border')}`,
+      color: primary,
+    },
+    messages: { flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 8 },
+    userMsg: {
+      alignSelf: 'flex-end',
+      background: primary,
+      color: c('primaryForeground'),
+      padding: '8px 12px',
+      borderRadius: `${radius('md')} ${radius('md')} ${radius('sm')} ${radius('md')}`,
+      fontSize: 13,
+      maxWidth: '85%',
+    },
+    aiMsg: {
+      alignSelf: 'flex-start',
+      background: c('surface'),
+      color: c('foreground'),
+      border: `1px solid ${c('border')}`,
+      padding: '8px 12px',
+      borderRadius: `${radius('md')} ${radius('md')} ${radius('md')} ${radius('sm')}`,
+      fontSize: 13,
+      maxWidth: '85%',
+      whiteSpace: 'pre-wrap',
+    },
+    notice: {
+      alignSelf: 'stretch',
+      background: mix(c('warning'), 12, c('background')),
+      border: `1px solid ${mix(c('warning'), 50, c('border'))}`,
+      color: c('foreground'),
+      padding: '8px 12px',
+      borderRadius: radius('md'),
+      fontSize: 12.5,
+      lineHeight: 1.5,
+    },
+    intro: { color: c('muted'), fontSize: 13, lineHeight: 1.6 },
+    suggestion: {
+      textAlign: 'left',
+      background: c('surface'),
+      border: `1px solid ${c('border')}`,
+      borderRadius: radius('md'),
+      padding: '8px 10px',
+      fontSize: 12.5,
+      color: c('foreground'),
+      cursor: 'pointer',
+      fontFamily: font,
+    },
+    inputRow: { display: 'flex', gap: 8, padding: 12, borderTop: `1px solid ${c('border')}` },
+    input: {
+      flex: 1,
+      border: `1px solid ${c('border')}`,
+      borderRadius: radius('md'),
+      padding: '10px 12px',
+      fontSize: 13,
+      outline: 'none',
+      background: c('background'),
+      color: c('foreground'),
+      fontFamily: font,
+    },
+    sendBtn: {
+      background: brandGradient,
+      color: c('primaryForeground'),
+      border: 'none',
+      borderRadius: radius('md'),
+      padding: '0 16px',
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: 'pointer',
+      fontFamily: font,
+    },
+    ghostBtn: {
+      background: 'transparent',
+      border: `1px solid ${c('border')}`,
+      borderRadius: radius('sm'),
+      padding: '4px 8px',
+      fontSize: 12,
+      color: c('muted'),
+      cursor: 'pointer',
+      fontFamily: font,
+    },
+    iconBtn: {
+      background: 'transparent',
+      border: 'none',
+      fontSize: 14,
+      color: c('muted'),
+      cursor: 'pointer',
+    },
+  };
+}
