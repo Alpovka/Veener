@@ -1,6 +1,6 @@
-export { VeneerProvider, useVeneer, hashRegistry } from './context';
-export { VeneerFrame } from './VeneerFrame';
-export { useVeneerGenerate } from './useVeneerGenerate';
+export { VeneerProvider, useVeneer, hashRegistry } from './context.js';
+export { VeneerFrame } from './VeneerFrame.js';
+export { useVeneerGenerate } from './useVeneerGenerate.js';
 // Re-exported for hosts that test their registries or build custom canvases.
 export {
   runBridgeAction,

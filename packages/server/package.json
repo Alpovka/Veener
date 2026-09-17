@@ -4,12 +4,21 @@
   "description": "Veneer generation endpoint for any Fetch-API runtime: owns the registry, builds the prompt, guards the request, calls your LLM, scans the generated code. Requires a Veneer license key.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
+  "sideEffects": false,
   "main": "./src/index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": { "types": "./index.d.ts", "default": "./src/index.js" },
+    "./package.json": "./package.json"
   },
-  "files": ["src", "README.md", "LICENSE"],
+  "files": ["src", "index.d.ts", "README.md", "LICENSE"],
   "scripts": { "test": "vitest run" },
+  "keywords": ["veneer", "ai", "ui-generation", "llm", "nextjs"],
+  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/server" },
+  "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/server#readme",
+  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@babel/parser": "^7.29.0",
     "@babel/traverse": "^7.29.0",

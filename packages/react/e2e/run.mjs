@@ -23,7 +23,8 @@ import { buildFrameResponse } from '@veneer/server';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const CHROME = process.env.CHROME_PATH || ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/opt/pw-browsers/chromium/chrome-linux/chrome'].find(existsSync);
+// Chromium: CHROME_PATH if set, else a preinstalled binary, else Playwright's own download (CI).
+const CHROME = process.env.CHROME_PATH || ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/opt/pw-browsers/chromium/chrome-linux/chrome'].find(existsSync) || undefined;
 
 const bundle = await build({
   entryPoints: [resolve(here, 'harness/host.jsx')],

@@ -28,12 +28,15 @@ This repo is an npm workspace:
 
 ```
 veneer/
-├── packages/core/     # @veneer/core   (MIT)  shared validators, scanner, frame document, theme
-├── packages/react/    # @veneer/react  (MIT)  VeneerProvider, VeneerFrame, useVeneerGenerate
+├── packages/core/     # @veneer/core   (MIT)  shared validators, scanner, frame document, theme, token verification
+├── packages/react/    # @veneer/react  (MIT)  VeneerProvider, VeneerFrame, useVeneerGenerate (built to dist/ by esbuild)
 ├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client
 ├── packages/cloud/    # @veneer/cloud  reference Veneer Cloud: API keys, quota, token signing, hosted generation
 └── examples/demo/     # the Next.js demo site (consumes the packages from the workspace)
 ```
+
+Release notes live in `CHANGELOG.md`; how to report a vulnerability in `SECURITY.md`; what has to be
+in place before a production deployment in `docs/PRODUCTION.md`.
 
 Product shape: the client is open and readable (security never depends on secrecy); the
 generation endpoint is either self-hosted with `@veneer/server` and a license key, or Veneer
@@ -125,10 +128,14 @@ const actions = {
 };
 
 <VeneerProvider registry={registry} actions={actions} data={{ tasks }} defaultUI={defaultUI}>
-  <VeneerFrame style={{ height: 620 }} />
-  <VeneerChat />
+  <VeneerFrame frameSrc="/veneer-frame" autoHeight />
+  <YourChatBox />   {/* any UI built on useVeneerGenerate(); the SDK ships no chat widget */}
 </VeneerProvider>
 ```
+
+Install is one command: `npm install @veneer/react @veneer/server`. `@veneer/core` comes along as a
+dependency of both (like `scheduler` does for `react-dom`); you never import it directly. The client
+ships compiled JavaScript plus TypeScript declarations, so no bundler configuration is needed.
 
 The registry's plain-English descriptions are handed to the model so it knows what it can do; the
 registry's ids are what the bridge enforces at runtime. Generated code reads data via
@@ -140,12 +147,13 @@ See **`packages/react/README.md`** and **`packages/server/README.md`** for the A
 
 ## Running it
 
-You'll need **Node 18+** and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
+You'll need **Node 20+** (`.nvmrc` pins 22) and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
 
 ```bash
-# 1. Install the workspace and run the tests
+# 1. Install the workspace (this also builds @veneer/react's dist) and run the tests
 npm install
 npm test                       # unit tests for all packages
+npm run typecheck              # the hand-written .d.ts files against a TypeScript smoke file
 npm run test:e2e               # browser tests in Chromium (sandbox, bridge, CSP, navigation detection)
 
 # 2. Configure the demo

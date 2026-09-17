@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { ThemeProvider } from './_components/theme';
 import SmoothScroll from './_components/smooth-scroll';
 import { Analytics } from '@vercel/analytics/next';
+import { SITE_URL } from './site';
 
 // Runs before paint to set the theme class — prevents a flash of the wrong theme.
 const noFlashTheme = `(function(){try{var t=localStorage.getItem('veneer-theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
@@ -14,7 +15,7 @@ const description =
   'Veneer is an open-source React npm package that lets your end users redesign your app with AI. The model writes real UI code that runs in a hard security sandbox and can only ever use the capabilities you register.';
 
 export const metadata = {
-  metadataBase: new URL('https://veener.vercel.app'),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: title,
     template: '%s · Veneer',
@@ -38,7 +39,7 @@ export const metadata = {
     siteName: 'Veneer',
     title,
     description,
-    url: 'https://veener.vercel.app',
+    url: SITE_URL,
     images: [
       {
         url: '/opengraph-image.png',

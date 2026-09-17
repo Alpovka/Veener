@@ -330,9 +330,10 @@ const RUNTIME = `
 
 /** The complete HTML document for the sandbox (used for srcDoc and for server/buildFrameResponse). */
 export function buildFrameSrcDoc() {
+  // Function replacers: a string replacement would interpret `$$`/`$&` inside the scanner source.
   const runtime = RUNTIME
-    .replace('__SCANNER__', createScanner.toString())
-    .replace('__VERSION__', String(PROTOCOL_VERSION));
+    .replace('__SCANNER__', () => createScanner.toString())
+    .replace('__VERSION__', () => String(PROTOCOL_VERSION));
   return `<!doctype html>
 <html>
 <head>

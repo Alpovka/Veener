@@ -11,7 +11,12 @@ const port = Number(process.env.PORT || 8787);
 http
   .createServer(async (req, res) => {
     const chunks = [];
-    for await (const c of req) chunks.push(c);
+    let bytes = 0;
+    for await (const c of req) {
+      bytes += c.length;
+      if (bytes > 1_000_000) { res.writeHead(413, { 'content-type': 'application/json' }); res.end('{"error":"Request too large."}'); req.destroy(); return; }
+      chunks.push(c);
+    }
     const request = new Request(`http://${req.headers.host || 'localhost'}${req.url}`, { method: req.method, headers: req.headers, body: chunks.length ? Buffer.concat(chunks) : undefined });
     const response = await app(request);
     res.writeHead(response.status, Object.fromEntries(response.headers));

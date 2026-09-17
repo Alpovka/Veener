@@ -135,7 +135,27 @@ describe('license tokens', () => {
     expect(r.code).toBe('unlicensed');
     await act(async () => { r = await hook().generate('4'); });
     expect(r.code).toBe('unlicensed');
+    expect(r.reason).toBe('missing');
   });
+  it('does not require a token for chat/clarify turns (they carry no code and are not metered)', async () => {
+    const responses = [
+      { code: null, reply: 'Doing well, thanks!', intent: 'chat' },
+      { code: null, reply: 'Which column?', intent: 'clarify' },
+      { code: null, reply: 'Not available.', blocked: true },
+    ];
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => responses.shift() }));
+    const hook = mount({ fetch: fetchImpl, publicKeys: ['3pCfCqRKqaywA5ojT-CDJw87U-5UKj9jF1qoCFMP5mI'] });
+    let r;
+    await act(async () => { r = await hook().generate('how are you?'); });
+    expect(r).toMatchObject({ ok: true, changed: false, intent: 'chat', reply: 'Doing well, thanks!' });
+    await act(async () => { r = await hook().generate('move it'); });
+    expect(r).toMatchObject({ ok: true, changed: false, intent: 'clarify' });
+    await act(async () => { r = await hook().generate('delete everything'); });
+    expect(r).toMatchObject({ ok: true, changed: false, blocked: true });
+    expect(hook().history.filter((m) => m.error)).toHaveLength(0);
+    expect(hook().currentUI).toBe('DEFAULT');
+  });
+  // The off-localhost dev-token case lives in useVeneerGenerate.remote.test.jsx (jsdom URL differs).
   it('accepts the dev token on localhost only', async () => {
     // jsdom's default URL is http://localhost:3000 → dev token accepted (the earlier tests rely on this)
     expect(window.location.hostname).toBe('localhost');

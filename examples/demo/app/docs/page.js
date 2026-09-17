@@ -94,7 +94,7 @@ export default function DocsPage() {
             Build with Veneer
           </h1>
           <p className="mt-3 max-w-2xl text-lg text-slate-600 dark:text-slate-400">
-            Register the capabilities your app exposes, drop in three components, and let your users
+            Register the capabilities your app exposes, drop in a provider, a canvas and a hook, and let your users
             redesign the UI with AI — safely sandboxed.
           </p>
         </div>
@@ -157,15 +157,17 @@ export default function DocsPage() {
                 <strong>Preview Notice:</strong> Package names and structure may still change before the public release. <Ic>@veneer/react</Ic> is MIT-licensed; <Ic>@veneer/server</Ic> requires a Veneer license key (or use Veneer Cloud as the endpoint).
               </Callout>
               <P>
-                The package ships untranspiled JSX. With Next.js, add{' '}
-                <Ic>transpilePackages: ['@veneer/react', '@veneer/core']</Ic> to <Ic>next.config.js</Ic>.
+                <Ic>@veneer/core</Ic> is installed automatically as a dependency of both packages; you never
+                import it. The client ships compiled ESM and TypeScript declarations, so Next.js, Vite and
+                Remix need no extra configuration. React 18 or 19.
               </P>
             </section>
 
             <section className="mt-12">
               <H id="quick-start">Quick start</H>
               <P>
-                Declare a registry, pass your real implementations, and render the three components.
+                Declare a registry, pass your real implementations, render the provider and the canvas, and
+                wire any chat box to <Ic>useVeneerGenerate()</Ic>.
                 The registry’s plain-English descriptions are handed to the model; its ids are what
                 the bridge enforces at runtime.
               </P>
@@ -199,8 +201,11 @@ export default function DocsPage() {
                 </EditorFrame>
               </div>
               <P>
-                You also implement the generator endpoint (<Ic>POST /api/veneer</Ic>) that calls your
-                LLM and returns <Ic>{'{ code, reply }'}</Ic>.
+                The generator endpoint (<Ic>POST /api/veneer</Ic>) is <Ic>createVeneerHandler</Ic> from{' '}
+                <Ic>@veneer/server</Ic>: self-hosted with your LLM and a license key, or pointed at Veneer
+                Cloud with an API key. Either way it returns <Ic>{'{ code, intent, reply, token }'}</Ic>;{' '}
+                <Ic>code</Ic> is <Ic>null</Ic> for chat turns, and the client applies code only with a
+                valid <Ic>token</Ic>.
               </P>
             </section>
 
@@ -282,8 +287,9 @@ export default function DocsPage() {
             <section className="mt-12">
               <H id="branding">Branding</H>
               <P>
-                Pass a <Ic>theme</Ic> to <Ic>VeneerProvider</Ic> and both the generated UI and the chat
-                widget take your brand: colours (per light/dark mode), radii, fonts and shadows become{' '}
+                Pass a <Ic>theme</Ic> to <Ic>VeneerProvider</Ic> and the generated UI takes your brand
+                (your own chat UI can read the same tokens from <Ic>useVeneer()</Ic>): colours (per
+                light/dark mode), radii, fonts and shadows become{' '}
                 <Ic>--veneer-*</Ic> variables inside the sandbox, and Tailwind utilities such as{' '}
                 <Ic>bg-primary</Ic>, <Ic>text-foreground</Ic>, <Ic>border-border</Ic> and{' '}
                 <Ic>rounded-md</Ic> resolve to them. The model is told to use exactly that vocabulary.
@@ -337,10 +343,10 @@ export default function DocsPage() {
                   See the live demo
                 </a>
                 <a
-                  href="/#pricing"
+                  href="/#waitlist"
                   className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                 >
-                  Start 7 days free
+                  Join the waitlist
                 </a>
               </div>
             </div>

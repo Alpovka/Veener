@@ -4,18 +4,32 @@
   "description": "Veneer client SDK for React: a provider, a sandboxed canvas that renders AI-generated UI against your registered capabilities, and a headless hook for the generation chat.",
   "license": "MIT",
   "type": "module",
-  "main": "./src/index.js",
-  "module": "./src/index.js",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
-  "files": ["src", "README.md"],
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
+    "build": "node build.mjs",
+    "prepare": "node build.mjs",
+    "prepack": "node build.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node e2e/run.mjs"
   },
-  "keywords": ["react", "ai", "personalization", "sandbox", "ui-generation"],
+  "keywords": ["react", "ai", "personalization", "sandbox", "ui-generation", "generative-ui"],
+  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/react" },
+  "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/react#readme",
+  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18"
@@ -26,18 +40,12 @@
   "devDependencies": {
     "@babel/standalone": "7.29.8",
     "@fontsource/inter": "^5.3.0",
-    "@jitl/quickjs-wasmfile-debug-sync": "0.32.0",
-    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@playwright/test": "^1.63.0",
     "@veneer/server": "0.3.0",
     "esbuild": "^0.28.2",
     "jsdom": "^27.0.0",
-    "preact": "^10.29.0",
-    "quickjs-emscripten-core": "0.32.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "sucrase": "^3.35.0",
-    "tailwindcss": "^4.3.0",
     "vitest": "^5.0.0"
   }
 }

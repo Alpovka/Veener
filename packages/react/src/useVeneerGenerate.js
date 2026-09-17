@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useRef, useState } from 'react';
-import { useVeneer } from './context';
+import { useVeneer } from './context.js';
 import { verifyLicenseToken, DEV_TOKEN, isLocalHost, hashRegistryShape } from '@veneer/core';
 
 const MAX_HISTORY_TURNS = 20;
@@ -30,15 +30,17 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
   const [error, setError] = useState(null);
   const undoStack = useRef([]);
   const abortRef = useRef(null);
+  const busyRef = useRef(false); // synchronous guard: state updates land a render later
 
   const generate = useCallback(
     async (input) => {
       const message = typeof input === 'string' ? input.trim() : '';
-      if (!message || busy) return null;
+      if (!message || busyRef.current) return null;
       const priorHistory = history.slice(-MAX_HISTORY_TURNS);
       const previousUi = ui;
       setError(null);
       setHistory((h) => [...h, { role: 'user', content: message }]);
+      busyRef.current = true;
       setBusy(true);
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       abortRef.current = controller;
@@ -58,18 +60,21 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
         } catch (e) {
           json = null;
         }
+        const changed = !!json && typeof json.code === 'string' && json.code.trim().length > 0;
+        // Only responses that carry code need a license token: chat turns, clarifications and
+        // refusals are not metered and arrive without one.
+        const license = !res.ok || !json || json.error || !changed || !requireLicense ? { ok: true } : await checkLicense(json.token, registry, publicKeys);
         if (!res.ok || !json || typeof json !== 'object' || json.error) {
           const msg = json && typeof json.error === 'string' ? json.error : `The design service returned an error (${res.status}).`;
           setError(msg);
           setHistory((h) => [...h, { role: 'assistant', content: msg, error: true }]);
           outcome = { ok: false, error: msg, code: json && json.code };
-        } else if (requireLicense && !(await isLicensed(json.token, registry, publicKeys))) {
-          const msg = 'This response was not licensed by Veneer, so it was not applied.';
+        } else if (!license.ok) {
+          const msg = license.message;
           setError(msg);
           setHistory((h) => [...h, { role: 'assistant', content: msg, error: true }]);
-          outcome = { ok: false, error: msg, code: 'unlicensed' };
+          outcome = { ok: false, error: msg, code: 'unlicensed', reason: license.reason };
         } else {
-          const changed = typeof json.code === 'string' && json.code.trim().length > 0;
           if (changed) {
             undoStack.current.push(previousUi);
             setUi(json.code);
@@ -89,10 +94,11 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
         outcome = { ok: false, error: msg };
       }
       abortRef.current = null;
+      busyRef.current = false;
       setBusy(false);
       return outcome;
     },
-    [busy, history, ui, endpoint, headers, fetchImpl, setUi, requireLicense, publicKeys, registry]
+    [history, ui, endpoint, headers, fetchImpl, setUi, requireLicense, publicKeys, registry]
   );
 
   const cancel = useCallback(() => {
@@ -136,11 +142,25 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
   };
 }
 
-async function isLicensed(token, registry, publicKeys) {
+/**
+ * @returns {Promise<{ ok: true } | { ok: false, reason: string, message: string }>}
+ */
+async function checkLicense(token, registry, publicKeys) {
   if (token === DEV_TOKEN) {
     const host = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
-    return isLocalHost(host);
+    if (isLocalHost(host)) return { ok: true };
+    return {
+      ok: false,
+      reason: 'dev-token',
+      message:
+        'The server runs Veneer unlicensed (license: false), which only works on localhost. Add a license key or use Veneer Cloud for this deployment.',
+    };
   }
   const v = await verifyLicenseToken(token, { registryHash: hashRegistryShape(registry), ...(publicKeys ? { publicKeys } : {}) });
-  return v.ok;
+  if (v.ok) return { ok: true };
+  // No WebCrypto (insecure origins, very old browsers): the server already enforced the license,
+  // so fail open rather than breaking the product for that visitor.
+  if (v.reason === 'unsupported-runtime') return { ok: true };
+  const detail = v.reason === 'missing' ? 'no license token came back' : `token ${v.reason}`;
+  return { ok: false, reason: v.reason, message: `This response was not licensed by Veneer (${detail}), so it was not applied.` };
 }

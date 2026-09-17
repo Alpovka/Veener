@@ -1,7 +1,7 @@
 'use client';
 import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react';
-import { useVeneer } from './context';
-import { buildFrameSrcDoc, FRAME_SANDBOX, PROTOCOL_VERSION, runBridgeAction, pickRegisteredData, createRateLimiter } from '@veneer/core';
+import { useVeneer } from './context.js';
+import { buildFrameSrcDoc, FRAME_SANDBOX, PROTOCOL_VERSION, runBridgeAction, pickRegisteredData, createRateLimiter, BridgeError } from '@veneer/core';
 
 /**
  * Mounts the sandboxed iframe and runs the parent-side bridge.
@@ -92,7 +92,7 @@ function FrameInstance({
   lastHeightRef,
 }) {
   const ctx = useVeneer();
-  const { ui, registry, actions, data, flagViolation, themePayload } = ctx;
+  const { ui, registry, actions, data, flagViolation, themePayload, violation } = ctx;
   const [height, setHeight] = useState(() => (lastHeightRef && lastHeightRef.current) || minHeight);
   const [clipped, setClipped] = useState(false); // content taller than maxHeight → let the frame scroll
   const clampHeight = useCallback(
@@ -231,7 +231,11 @@ function FrameInstance({
           .catch((err) => {
             s.inflight--;
             report({ type: 'action-rejected', action: d.action, code: err && err.code, message: String((err && err.message) || err) });
-            reply(false, String((err && err.message) || err));
+            // Bridge validation messages are safe to show generated code (they describe the
+            // contract). Errors thrown by the host's own implementation may carry internals
+            // (stack traces, connection strings), so the sandbox only gets a generic message.
+            const safe = err instanceof BridgeError || (err && typeof err.code === 'string' && err.name === 'BridgeError');
+            reply(false, safe ? String(err.message) : 'The action failed.');
           });
       } else if (d.type === 'error') {
         report({ type: 'frame-error', kind: d.kind, message: String(d.message || '') });
@@ -242,6 +246,12 @@ function FrameInstance({
     },
     [portSend, report, validation, violate, autoHeight, clampHeight, lastHeightRef, maxHeight]
   );
+  // The port's handler is assigned once at init; route it through a ref so prop changes
+  // (validation, maxHeight…) after init are honoured instead of freezing the first closure.
+  const onPortMessageRef = useRef(onPortMessage);
+  useLayoutEffect(() => {
+    onPortMessageRef.current = onPortMessage;
+  });
 
   const tryInit = useCallback(() => {
     const s = st.current;
@@ -250,7 +260,7 @@ function FrameInstance({
     const { ui, registry, data, themePayload } = latest.current;
     const channel = new MessageChannel();
     s.port = channel.port1;
-    s.port.onmessage = onPortMessage;
+    s.port.onmessage = (ev) => onPortMessageRef.current(ev);
     s.inited = true;
     if (s.readyTimer) clearTimeout(s.readyTimer);
     s.readyTimer = null;
@@ -297,7 +307,7 @@ function FrameInstance({
       s.awaitingPong = true;
       portSend({ type: 'ping', seq: ++s.pingSeq });
     }, heartbeatMs);
-  }, [onPortMessage, portSend, report, teardown, violate, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, autoHeight]);
+  }, [portSend, report, teardown, violate, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, autoHeight]);
 
   // Push theme changes (mode flip, fonts arriving, host re-branding) into the running frame.
   useEffect(() => {
@@ -381,20 +391,25 @@ function FrameInstance({
     portSend({ type: 'data', data: registered });
   }, [data, registry, portSend]);
 
+  const placeholderStyle = Object.assign(
+    { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui', fontSize: 13 },
+    style,
+    autoHeight ? { height } : null
+  );
   if (dead) {
+    // The provider decides whether a fresh instance follows (it refuses when the default UI
+    // itself is the offender or violations are arriving in a loop; then only `reset()` recovers).
+    const stayingDown = violation && violation.remounted === false;
     return (
-      <div
-        className={className}
-        role="status"
-        style={Object.assign(
-          { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui', fontSize: 13 },
-          style
-        )}
-      >
-        This view was stopped for safety and is being reset.
+      <div className={className} role="status" style={placeholderStyle}>
+        {stayingDown ? 'This view was stopped for safety. Reset the canvas to continue.' : 'This view was stopped for safety and is being reset.'}
       </div>
     );
   }
+  // The iframe is mounted only once the window listener exists (see the layout effect above).
+  // Mounting it earlier would give the browser an about:blank document whose `load` event
+  // would count as the first load, letting `init` run before the real document's `load`.
+  if (!attached) return <div className={className} aria-busy="true" style={placeholderStyle} />;
 
   const frameProps = {
     ref: iframeRef,
@@ -410,9 +425,7 @@ function FrameInstance({
     ),
   };
   if (autoHeight) frameProps.scrolling = clipped ? 'auto' : 'no';
-  if (attached) {
-    if (frameSrc) frameProps.src = frameSrc;
-    else frameProps.srcDoc = srcDoc;
-  }
+  if (frameSrc) frameProps.src = frameSrc;
+  else frameProps.srcDoc = srcDoc;
   return <iframe {...frameProps} />;
 }

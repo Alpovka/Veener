@@ -1,17 +1,26 @@
 {
   "name": "@veneer/core",
   "version": "0.3.0",
-  "description": "Shared, framework-free pieces of the Veneer SDK: registry validation, the bridge's argument checks, and the static scanner for generated code.",
+  "description": "Shared, framework-free pieces of the Veneer SDK: registry validation, the bridge's argument checks, the static scanner for generated code, the sandbox document, the theme contract and license-token verification.",
   "license": "MIT",
   "type": "module",
+  "sideEffects": false,
   "main": "./src/index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": { "types": "./index.d.ts", "default": "./src/index.js" },
     "./scan": "./src/scan.js",
-    "./bridge": "./src/bridge.js"
+    "./bridge": "./src/bridge.js",
+    "./package.json": "./package.json"
   },
-  "files": ["src", "README.md"],
+  "files": ["src", "index.d.ts", "README.md", "LICENSE"],
   "scripts": { "test": "vitest run" },
+  "keywords": ["veneer", "sandbox", "ui-generation"],
+  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/core" },
+  "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/core#readme",
+  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" },
   "devDependencies": {
     "@babel/parser": "^7.29.0",
     "@babel/standalone": "7.29.8",

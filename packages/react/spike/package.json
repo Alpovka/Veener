@@ -1,0 +1,19 @@
+{
+  "name": "@veneer/spike-engine-v2",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M0 spike for the interpreter-in-worker engine (QuickJS + Preact + Tailwind v4). Not published; see README.md.",
+  "type": "module",
+  "scripts": {
+    "spike": "node quickjs-spike.mjs && node tailwind-spike.mjs"
+  },
+  "devDependencies": {
+    "@jitl/quickjs-wasmfile-debug-sync": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "esbuild": "^0.28.2",
+    "preact": "^10.29.0",
+    "quickjs-emscripten-core": "0.32.0",
+    "sucrase": "^3.35.0",
+    "tailwindcss": "^4.3.0"
+  }
+}

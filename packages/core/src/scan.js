@@ -24,6 +24,8 @@ export function createScanner(parser, traverse) {
   ];
   var FORBIDDEN_MEMBERS = ['constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
   var FORBIDDEN_JSX_ATTRS = ['dangerouslySetInnerHTML', 'srcDoc', 'srcdoc', 'httpEquiv', 'formAction', 'formaction'];
+  // Elements that can reach the network or the document without CSP coverage (dns-prefetch, meta refresh…).
+  var FORBIDDEN_JSX_ELEMENTS = ['link', 'meta', 'base', 'iframe', 'frame', 'object', 'embed', 'script', 'style', 'html', 'head', 'body', 'title'];
   var VENEER_METHODS = ['action', 'data'];
 
   function has(list, name) {
@@ -94,11 +96,22 @@ export function createScanner(parser, traverse) {
       'MemberExpression|OptionalMemberExpression': function (p) {
         var name = memberName(p.node);
         if (name && has(FORBIDDEN_MEMBERS, name)) add('access to `.' + name + '` is not allowed', p.node);
+        // obj['con' + 'structor'] / obj[`${x}`] / obj[f()]: string-built keys exist only to dodge the check above.
+        if (p.node.computed) {
+          var k = p.node.property;
+          var built = k && (k.type === 'BinaryExpression' || (k.type === 'TemplateLiteral' && k.expressions.length > 0) || k.type === 'CallExpression' || k.type === 'ConditionalExpression' || k.type === 'LogicalExpression');
+          if (built) add('computed property access with a constructed key is not allowed', p.node);
+        }
         // veneer[...] must be a literal 'action' / 'data'
         var obj = p.node.object;
         if (obj && obj.type === 'Identifier' && obj.name === 'veneer' && isFree(p, 'veneer')) {
           if (!name || !has(VENEER_METHODS, name)) add('only veneer.action and veneer.data may be used', p.node);
         }
+      },
+      JSXOpeningElement: function (p) {
+        var n = p.node.name;
+        var tag = n && n.type === 'JSXIdentifier' ? n.name : '';
+        if (tag && has(FORBIDDEN_JSX_ELEMENTS, tag.toLowerCase()) && tag[0] === tag[0].toLowerCase()) add('element <' + tag + '> is not allowed', p.node);
       },
       JSXAttribute: function (p) {
         var n = p.node.name;

@@ -91,15 +91,24 @@ export function VeneerProvider({
   // Resolve by value so hosts can pass an inline object without re-triggering work every render.
   const themeKey = useMemo(() => JSON.stringify(themeProp || {}), [themeProp]);
   const resolvedTheme = useMemo(() => resolveTheme(themeProp), [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (resolvedTheme.problems.length && typeof onThemeError === 'function') {
-      try {
-        onThemeError({ type: 'theme-invalid', problems: resolvedTheme.problems });
-      } catch (e) {
-        /* ignore */
-      }
+  // Hosts usually pass inline callbacks; read them through refs so a new identity per render does
+  // not re-fire the theme report (or re-run any effect) on every render.
+  const onThemeErrorRef = useRef(onThemeError);
+  const onSecurityViolationRef = useRef(onSecurityViolation);
+  onThemeErrorRef.current = onThemeError;
+  onSecurityViolationRef.current = onSecurityViolation;
+  const reportThemeError = useCallback((e) => {
+    const cb = onThemeErrorRef.current;
+    if (typeof cb !== 'function') return;
+    try {
+      cb(e);
+    } catch (err) {
+      /* host callback errors must not break the SDK */
     }
-  }, [resolvedTheme, onThemeError]);
+  }, []);
+  useEffect(() => {
+    if (resolvedTheme.problems.length) reportThemeError({ type: 'theme-invalid', problems: resolvedTheme.problems });
+  }, [resolvedTheme, reportThemeError]);
 
   const [systemDark, setSystemDark] = useState(false);
   useEffect(() => {
@@ -125,17 +134,7 @@ export function VeneerProvider({
       setThemeFonts([]);
       return undefined;
     }
-    loadThemeFonts(fonts, {
-      onError: (e) => {
-        if (typeof onThemeError === 'function') {
-          try {
-            onThemeError(e);
-          } catch (err) {
-            /* ignore */
-          }
-        }
-      },
-    }).then((loaded) => {
+    loadThemeFonts(fonts, { onError: reportThemeError }).then((loaded) => {
       if (!cancelled) setThemeFonts(loaded);
     });
     return () => {
@@ -216,15 +215,16 @@ export function VeneerProvider({
       setViolation(record);
       if (!isDefault) setUiState(defaultUI);
       if (record.remounted) setGeneration((g) => g + 1);
-      if (typeof onSecurityViolation === 'function') {
+      const cb = onSecurityViolationRef.current;
+      if (typeof cb === 'function') {
         try {
-          onSecurityViolation(record);
+          cb(record);
         } catch (e) {
           /* host callback errors must not break the SDK */
         }
       }
     },
-    [ui, defaultUI, persist, storageKey, quarantineKey, onSecurityViolation]
+    [ui, defaultUI, persist, storageKey, quarantineKey]
   );
 
   /** Bring back the quarantined UI (host decision; it will run in a fresh sandbox and be re-scanned). */

@@ -6,9 +6,14 @@ import { useVeneer, useVeneerGenerate } from '@veneer/react';
  * The demo's floating chat, built on the SDK's headless `useVeneerGenerate` hook. The SDK ships
  * no chat UI on purpose: every product has its own; copy this file as a starting point.
  */
-export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'viewport', headers }) {
+// Generated code is applied only with a valid Veneer license token. The unlicensed DEV token the
+// server issues with `license: false` is accepted on localhost only, so a deployment that runs
+// without a license or cloud key must opt out explicitly (NEXT_PUBLIC_VENEER_REQUIRE_LICENSE=false).
+const REQUIRE_LICENSE = process.env.NEXT_PUBLIC_VENEER_REQUIRE_LICENSE !== 'false';
+
+export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'viewport', headers, requireLicense = REQUIRE_LICENSE }) {
   const { theme, resolvedMode } = useVeneer();
-  const { generate, busy, history, clearHistory, reset, violation, clearViolation } = useVeneerGenerate({ endpoint, headers });
+  const { generate, busy, history, clearHistory, reset, violation, clearViolation } = useVeneerGenerate({ endpoint, headers, requireLicense });
   const S = useMemo(() => makeStyles(theme, resolvedMode === 'dark'), [theme, resolvedMode]);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
