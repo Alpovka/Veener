@@ -27,7 +27,10 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
   capped; OpenAI/Anthropic request bodies use the parameters those APIs accept.
 - Core: license tokens live 26 h (24 h offline grace + skew); `iat` in the future no longer
   rejects a token; the scanner refuses `<link>`, `<meta>`, `<iframe>`, `<script>`, `<style>` and
-  similar elements and computed member access built from expressions.
+  similar elements, and computed member access whose key is built from strings
+  (`o['con' + 'structor']`, template literals with expressions, `.join()`/`atob()` results).
+  Numeric indexing such as `months[parseInt(x) - 1]` is allowed; an earlier draft of this rule
+  refused it and made the sandbox reject the demo's default view on every load.
 
 ### Changed
 

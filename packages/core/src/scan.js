@@ -42,6 +42,39 @@ export function createScanner(parser, traverse) {
     return null;
   }
 
+  // String-producing helpers that can assemble a forbidden property name at runtime.
+  var STRING_BUILDERS = ['join', 'concat', 'replace', 'replaceAll', 'toLowerCase', 'toUpperCase', 'fromCharCode', 'fromCodePoint', 'trim', 'slice', 'substring', 'substr', 'padStart', 'padEnd', 'repeat', 'normalize', 'reverse'];
+  var STRING_BUILDER_FUNCTIONS = ['String', 'atob', 'decodeURIComponent', 'decodeURI', 'unescape'];
+
+  /**
+   * Does this computed key *build a string* at runtime? `obj['con' + 'structor']`, obj[`${a}b`],
+   * obj[['c','o'].join('')] and obj[atob('...')] exist only to dodge the FORBIDDEN_MEMBERS check.
+   * Numeric indexing (`arr[i - 1]`, `months[parseInt(x) - 1]`, `list[i % n]`) and lookups with
+   * a plain identifier or a literal are normal UI code and pass.
+   */
+  function buildsString(node) {
+    if (!node) return false;
+    if (node.type === 'TemplateLiteral') return node.expressions.length > 0;
+    if (node.type === 'BinaryExpression') {
+      if (node.operator !== '+') return false;
+      var l = node.left, r = node.right;
+      return l.type === 'StringLiteral' || r.type === 'StringLiteral' || l.type === 'TemplateLiteral' || r.type === 'TemplateLiteral' || buildsString(l) || buildsString(r);
+    }
+    if (node.type === 'ConditionalExpression') return buildsString(node.consequent) || buildsString(node.alternate);
+    if (node.type === 'LogicalExpression') return buildsString(node.left) || buildsString(node.right);
+    if (node.type === 'SequenceExpression') return buildsString(node.expressions[node.expressions.length - 1]);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      var c = node.callee;
+      if (c.type === 'Identifier') return has(STRING_BUILDER_FUNCTIONS, c.name);
+      if (c.type === 'MemberExpression' || c.type === 'OptionalMemberExpression') {
+        var m = c.property && (c.property.type === 'Identifier' && !c.computed ? c.property.name : literalString(c.property));
+        return !!m && has(STRING_BUILDERS, m);
+      }
+      return false;
+    }
+    return false;
+  }
+
   function memberName(node) {
     if (!node.computed && node.property && node.property.type === 'Identifier') return node.property.name;
     if (node.computed) return literalString(node.property);
@@ -96,12 +129,8 @@ export function createScanner(parser, traverse) {
       'MemberExpression|OptionalMemberExpression': function (p) {
         var name = memberName(p.node);
         if (name && has(FORBIDDEN_MEMBERS, name)) add('access to `.' + name + '` is not allowed', p.node);
-        // obj['con' + 'structor'] / obj[`${x}`] / obj[f()]: string-built keys exist only to dodge the check above.
-        if (p.node.computed) {
-          var k = p.node.property;
-          var built = k && (k.type === 'BinaryExpression' || (k.type === 'TemplateLiteral' && k.expressions.length > 0) || k.type === 'CallExpression' || k.type === 'ConditionalExpression' || k.type === 'LogicalExpression');
-          if (built) add('computed property access with a constructed key is not allowed', p.node);
-        }
+        // obj['con' + 'structor'] / obj[`${x}`] / obj[[...].join('')]: string-built keys exist only to dodge the check above.
+        if (p.node.computed && buildsString(p.node.property)) add('computed property access with a constructed key is not allowed', p.node);
         // veneer[...] must be a literal 'action' / 'data'
         var obj = p.node.object;
         if (obj && obj.type === 'Identifier' && obj.name === 'veneer' && isFree(p, 'veneer')) {

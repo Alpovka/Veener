@@ -84,6 +84,38 @@ describe('scanner (server flavour)', () => {
   it('accepts template literal ids without expressions', () => {
     expect(scan('veneer.action(`createTask`, {})', ids).ok).toBe(true);
   });
+  it('blocks computed keys that build a string, allows numeric indexing and plain lookups', () => {
+    const blocked = [
+      "o['con' + 'structor']",
+      'o[`${a}structor`]',
+      "o[['c', 'onstructor'].join('')]",
+      "o[String.fromCharCode(99)]",
+      "o[atob('Y29uc3RydWN0b3I=')]",
+      "o[s.replace('x', '')]",
+      "o[dark ? 'con' + x : 'y']",
+      "o[k || 'pro' + 'to']",
+    ];
+    for (const src of blocked) expect(scan(`const r = ${src};`, ids).violations.join('\n'), src).toMatch(/constructed key/);
+    const allowed = [
+      "months[parseInt(p[1], 10) - 1]",
+      'arr[i + 1]',
+      'arr[i % 3]',
+      'arr[Math.min(i, 3)]',
+      "tone[dark ? 'dark' : 'light']",
+      "map[key || 'todo']",
+      'map[key]',
+      "map['todo']",
+      'rows[row.id]',
+      'cells[n]',
+    ];
+    for (const src of allowed) expect(scan(`const r = ${src};`, ids).violations.join('\n'), src).not.toMatch(/constructed key/);
+  });
+
+  it("accepts the demo's default UI (a regression the frame would otherwise refuse on every load)", async () => {
+    const { defaultUI, registry } = await import('../../../examples/demo/app/veneer.config.js');
+    expect(scan(defaultUI, registryIds(registry))).toEqual({ ok: true, violations: [] });
+  });
+
   it('does not flag property names that look like globals', () => {
     expect(scan('const t = veneer.data("tasks"); const x = t.window + t.location + t.fetch; render(<b>{x}</b>)', ids).ok).toBe(true);
   });
