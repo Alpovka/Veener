@@ -30,7 +30,8 @@ This repo is an npm workspace:
 veneer/
 ├── packages/core/     # @veneer/core   (MIT)  shared validators, scanner, frame document, theme
 ├── packages/react/    # @veneer/react  (MIT)  VeneerProvider, VeneerFrame, useVeneerGenerate
-├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse
+├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client
+├── packages/cloud/    # @veneer/cloud  reference Veneer Cloud: API keys, quota, token signing, hosted generation
 └── examples/demo/     # the Next.js demo site (consumes the packages from the workspace)
 ```
 

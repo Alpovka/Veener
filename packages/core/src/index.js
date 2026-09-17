@@ -27,3 +27,17 @@ export {
   loadThemeFonts,
   themePayload,
 } from './theme.js';
+export {
+  LICENSE_PUBLIC_KEYS,
+  DEV_TOKEN,
+  TOKEN_TTL_SECONDS,
+  signLicenseToken,
+  verifyLicenseToken,
+  generateKeyPair,
+  importPublicKey,
+  importPrivateKey,
+  isLocalHost,
+  b64urlEncode,
+  b64urlDecode,
+} from './license.js';
+export { hashRegistryShape } from './registry.js';

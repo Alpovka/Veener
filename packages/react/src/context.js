@@ -1,6 +1,8 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { resolveTheme, loadThemeFonts, themePayload as buildThemePayload } from '@veneer/core';
+import { resolveTheme, loadThemeFonts, themePayload as buildThemePayload, hashRegistryShape } from '@veneer/core';
+
+export const hashRegistry = hashRegistryShape;
 
 /**
  * The Veneer context exposes, to every Veneer component:
@@ -42,18 +44,6 @@ function getStore(persist) {
     /* storage can throw (privacy mode, disabled cookies) — fall back to memory */
   }
   return null;
-}
-
-/** Stable, cheap hash of the parts of the registry that define the capability surface. */
-export function hashRegistry(registry) {
-  const r = registry || {};
-  const shape = JSON.stringify({
-    a: (r.actions || []).map((a) => [a.id, (a.args || []).map((x) => x.name), !!a.returns]),
-    d: (r.dataSources || []).map((d) => d.id),
-  });
-  let h = 5381;
-  for (let i = 0; i < shape.length; i++) h = ((h * 33) ^ shape.charCodeAt(i)) >>> 0;
-  return h.toString(36);
 }
 
 function readStored(store, key, registryHash) {

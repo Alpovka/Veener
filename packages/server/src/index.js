@@ -8,23 +8,15 @@
  *
  * No React is imported here; this entry is safe to load in server-only code.
  */
-import * as parser from '@babel/parser';
-import traverseNs from '@babel/traverse';
-import { createScanner, registryIds, buildFrameHtml, FRAME_CSP, FRAME_SANDBOX, THEME_UTILITIES } from '@veneer/core';
+import { buildFrameHtml, FRAME_CSP, FRAME_SANDBOX, hashRegistryShape } from '@veneer/core';
+import { runGeneration, sanitizeHistory, GENERATION_LIMITS } from './generation.js';
+import { createLicenseClient, createDevLicenseClient, LicenseError } from './license.js';
 
-const traverse = typeof traverseNs === 'function' ? traverseNs : traverseNs.default;
-const scan = createScanner(parser, traverse);
-
-/** Scan generated code against a registry on the server (AST-based, scope-aware). */
-export function scanGeneratedCode(code, registry) {
-  return scan(code, registryIds(registry));
-}
+export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS } from './generation.js';
+export { createLicenseClient, LicenseError, DEFAULT_LICENSE_API } from './license.js';
 
 export const DEFAULT_HANDLER_OPTIONS = {
-  maxHistory: 20,
-  maxMessageChars: 4000,
-  maxHistoryTurnChars: 4000,
-  maxCurrentUIChars: 60000,
+  ...GENERATION_LIMITS,
   maxBodyBytes: 120000,
   timeoutMs: 45000,
   allowedOrigins: [],
@@ -86,35 +78,48 @@ export function checkRequestOrigin(request, { allowedOrigins = [], allowMissingF
   return { ok: false, status: 403, error: 'Cross-site requests are not allowed.' };
 }
 
-function sanitizeHistory(history, { maxHistory, maxHistoryTurnChars }) {
-  if (!Array.isArray(history)) return [];
-  return history
-    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .slice(-maxHistory)
-    .map((m) => ({ role: m.role, content: m.content.slice(0, maxHistoryTurnChars) }));
-}
 
 /**
  * Create a Fetch-API request handler for the generator endpoint.
  *
+ * Two ways to run it:
+ *  - Self-hosted: pass `licenseKey` and `generate` (your LLM call). Prompting, scanning and the
+ *    verify→repair loop run on your server; only a per-generation license check reaches Veneer.
+ *  - Veneer Cloud: pass `cloud: { apiKey, llm }`. This handler still owns the registry and guards
+ *    the request, then forwards { registry, brand, message, history, currentUI, llm } to Veneer
+ *    Cloud, which runs the pipeline with your LLM key and returns { code, reply, token }.
+ *  - Local development: `license: false` (self-hosted mode without a key; issues a DEV token that
+ *    @veneer/react only accepts on localhost).
+ *
  * @param {object} opts
  * @param {object} opts.registry   the SAME registry object the client passes to <VeneerProvider>
- * @param {(input: { system: string, messages: {role:'user'|'assistant', content:string}[], signal: AbortSignal }) => Promise<string>} opts.generate
- *        calls your LLM and resolves with the raw text of its reply (a JSON object per buildSystemPrompt)
+ * @param {(input: { system: string, messages: {role:'user'|'assistant', content:string}[], signal: AbortSignal }) => Promise<string>} [opts.generate]
+ * @param {string} [opts.licenseKey]
+ * @param {false} [opts.license]   pass false for local development without a key
+ * @param {{ apiKey: string, apiBase?: string, llm: { provider: 'gemini'|'openai'|'anthropic', key: string, model?: string } }} [opts.cloud]
  * @param {(key: string) => Promise<boolean>|boolean} [opts.rateLimit]  or `{ limit, windowMs }` for the in-memory default, or `false`
  * @param {string[]} [opts.allowedOrigins]  extra Origins allowed to call the endpoint (cross-origin embeds)
  * @param {(req: Request) => Promise<boolean>|boolean} [opts.authorize]  return false to reject with 401
  * @param {(err: unknown, ctx: object) => void} [opts.onError]  server-side logger (errors are never sent to clients)
- * @param {{ name?: string, tone?: string }} [opts.brand]  optional words about the brand for the prompt (token values stay on the client)
+ * @param {{ name?: string, tone?: string }} [opts.brand]
  */
 export function createVeneerHandler(opts) {
   if (!opts || !opts.registry) throw new Error('createVeneerHandler: `registry` is required');
-  if (typeof opts.generate !== 'function') throw new Error('createVeneerHandler: `generate` is required');
   const o = { ...DEFAULT_HANDLER_OPTIONS, ...opts };
   const registry = o.registry;
-  const system = buildSystemPrompt(registry, { brand: o.brand });
-  const ids = registryIds(registry);
+  const registryHash = hashRegistryShape(registry);
   const log = typeof o.onError === 'function' ? o.onError : () => {};
+  const cloudMode = !!o.cloud;
+  if (cloudMode) {
+    if (!o.cloud.apiKey) throw new Error('createVeneerHandler: `cloud.apiKey` is required in cloud mode');
+    if (!o.cloud.llm || !o.cloud.llm.provider || !o.cloud.llm.key) throw new Error('createVeneerHandler: `cloud.llm` needs { provider, key }');
+  } else {
+    if (typeof o.generate !== 'function') throw new Error('createVeneerHandler: `generate` is required (or use `cloud`)');
+    if (o.license !== false && !o.licenseKey) throw new Error('createVeneerHandler: `licenseKey` is required (or `license: false` for local development)');
+  }
+  const license = cloudMode ? null : o.license === false ? createDevLicenseClient() : (o.licenseClient || createLicenseClient({ licenseKey: o.licenseKey, apiBase: o.licenseApiBase, fetch: o.fetch, onError: (e) => log(e, { stage: 'license' }) }));
+  const fetchImpl = o.fetch || (typeof fetch === 'function' ? fetch : null);
+
   let allow;
   if (o.rateLimit === false) allow = async () => true;
   else if (typeof o.rateLimit === 'function') allow = o.rateLimit;
@@ -161,38 +166,50 @@ export function createVeneerHandler(opts) {
       if (currentUI.length > o.maxCurrentUIChars) return json({ error: 'Current UI is too large.' }, 413);
 
       const history = sanitizeHistory(body.history, o);
-      const messages = [...history, { role: 'user', content: buildUserPrompt(message, currentUI) }];
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), o.timeoutMs);
-      let raw;
       try {
-        raw = await o.generate({ system, messages, signal: controller.signal });
+        if (cloudMode) {
+          const res = await fetchImpl(`${(o.cloud.apiBase || DEFAULT_CLOUD_API).replace(/\/$/, '')}/v1/generate`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${o.cloud.apiKey}` },
+            body: JSON.stringify({ registry, brand: o.brand, message, history, currentUI, llm: o.cloud.llm }),
+            signal: controller.signal,
+          });
+          let out = null;
+          try {
+            out = await res.json();
+          } catch (e) {
+            out = null;
+          }
+          if (res.status === 401 || res.status === 402 || res.status === 403) {
+            log(new Error(`cloud refused: ${res.status}`), { stage: 'cloud', body: out });
+            return json({ error: (out && out.error) || 'Veneer Cloud refused the request. Check your API key and plan.', code: (out && out.code) || 'cloud-refused' }, res.status);
+          }
+          if (!res.ok || !out || typeof out !== 'object') {
+            log(new Error(`cloud error: ${res.status}`), { stage: 'cloud' });
+            return json({ error: 'The design service failed. Please try again.' }, 502);
+          }
+          return json({ code: typeof out.code === 'string' ? out.code : null, reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, token: out.token, remaining: out.remaining });
+        }
+
+        // Self-hosted: license first, then the pipeline.
+        let lic;
+        try {
+          lic = await license.assertGeneration({ registryHash });
+        } catch (e) {
+          if (e instanceof LicenseError) {
+            log(e, { stage: 'license' });
+            return json({ error: e.code === 'quota-exceeded' ? 'Veneer license quota exceeded for this period.' : e.code === 'unreachable' ? 'Veneer license service unreachable.' : 'Veneer license key invalid or inactive.', code: e.code }, e.status === 503 ? 503 : 402);
+          }
+          throw e;
+        }
+        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, log });
+        return json({ ...result, token: lic.token, ...(lic.stale ? { licenseStale: true } : {}) });
       } finally {
         clearTimeout(timer);
       }
-
-      const parsed = extractJson(typeof raw === 'string' ? raw : '');
-      if (!parsed) {
-        return json({ code: null, reply: "Sorry, I couldn't generate that. Try rephrasing." });
-      }
-      const reply = parsed.reply != null ? String(parsed.reply) : '';
-      if (parsed.code == null || parsed.code === '') return json({ code: null, reply: reply || 'Done.' });
-      const code = String(parsed.code);
-      if (code.length > o.maxCurrentUIChars) {
-        return json({ code: null, reply: 'That design came out too large to run safely. Try asking for something simpler.' });
-      }
-
-      const result = scan(code, ids);
-      if (!result.ok) {
-        log(new Error('generated code failed the scan'), { violations: result.violations, key });
-        return json({
-          code: null,
-          reply: friendlyScanReply(result.violations, registry),
-          blocked: result.violations,
-        });
-      }
-      return json({ code, reply });
     } catch (e) {
       log(e, { stage: 'handler' });
       const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));
@@ -201,14 +218,7 @@ export function createVeneerHandler(opts) {
   };
 }
 
-function friendlyScanReply(violations, registry) {
-  const unregistered = violations.filter((v) => /is not a registered/.test(v));
-  if (unregistered.length) {
-    const names = ((registry && registry.actions) || []).map((a) => a.id).join(', ');
-    return `I can't do that here — it needs a capability this app hasn't made available. I kept the current view. Actions I can use: ${names || 'none'}.`;
-  }
-  return "I generated something that isn't allowed in the sandbox, so I kept the current view. Try rephrasing the request.";
-}
+export const DEFAULT_CLOUD_API = 'https://api.veneer.dev';
 
 /**
  * Serve the sandbox document from a URL (pass its path as `frameSrc` to <VeneerFrame>). Unlike a
@@ -233,101 +243,3 @@ export function buildFrameResponse({ frameAncestors = "'self'" } = {}) {
   });
 }
 
-export function buildSystemPrompt(registry, { brand } = {}) {
-  const reg = JSON.stringify(registry || {}, null, 2);
-  const u = THEME_UTILITIES;
-  const brandLine = brand && (brand.name || brand.tone)
-    ? `\nThe host brand${brand.name ? ` is "${String(brand.name).slice(0, 80)}"` : ''}${brand.tone ? `; its tone is ${String(brand.tone).slice(0, 200)}` : ''}.`
-    : '';
-  return `You are Veneer, a UI generator embedded in a host web application. The end user will
-describe how they want the current page to look, and you generate the UI for it.
-
-You have FULL creative freedom over layout and design — invent any layout the request calls for
-(kanban board, calendar, dashboard, timeline, gallery, anything). But you operate inside a hard
-security sandbox: your code runs in an isolated iframe with no network access and no access to the
-host page. Your ONLY connection to the app is a small in-frame API.
-
-RESPONSE FORMAT — respond with ONLY a single JSON object, no prose, no markdown fences:
-{
-  "code": "<a self-contained React component, as a string>",
-  "reply": "<one or two friendly sentences to show the user>"
-}
-
-THE CODE YOU WRITE:
-- Is plain JSX. These globals are already available — DO NOT import anything, DO NOT use export:
-  React, useState, useEffect, useMemo, useCallback, useRef, veneer, render.
-- Defines a function component (e.g. function VeneerUI() { ... }) and ends by calling render(<VeneerUI />).
-- Reads data ONLY via veneer.data(sourceId) with a string literal id — returns the current value (usually an array).
-- Triggers actions ONLY via veneer.action(id, args) with a string literal id — returns a Promise. After an
-  action runs, fresh data is pushed in automatically and your component re-renders, so just call the
-  action. Actions resolve with undefined unless the registry entry declares "returns".
-- Styles with Tailwind CSS utility classes (Tailwind is available in the sandbox). Make it polished,
-  modern, and visually distinct — good spacing, rounded corners, subtle shadows, clear hierarchy.
-- MUST NOT use window, document, location, navigator, fetch, XMLHttpRequest, WebSocket, cookies,
-  localStorage, \`this\`, classes, dangerouslySetInnerHTML, <a href> links, or any external URL/script.
-  Code that does is rejected before it runs. Forms may use onSubmit (call e.preventDefault()) but never navigate.
-
-CAPABILITY RULES (this is the contract — follow it exactly):
-- You may ONLY call veneer.action(id, ...) with an action id that appears in the registry below.
-- You may ONLY call veneer.data(id) with a data source id that appears in the registry below.
-- Pass exactly the declared args, with the declared types. Unknown or wrongly typed args are rejected.
-- If the user asks for something that has NO matching registered capability (for example, deleting a
-  record when no delete action is registered), DO NOT invent it and DO NOT fake it. Instead, set
-  "code" to null (keep the current UI), and in "reply" politely explain that the action isn't
-  available in this app, naming what you can do instead.
-
-BRAND (the sandbox is themed by the host app — make the UI look like part of it):${brandLine}
-- Use these brand utilities for chrome and structure; they resolve to the host's own colours, radii and fonts:
-  surfaces: ${u.surfaces.join(', ')}
-  text: ${u.text.join(', ')}
-  borders: ${u.borders.join(', ')}
-  radius: ${u.radius.join(', ')}   fonts: ${u.fonts.join(', ')}   shadows: ${u.shadows.join(', ')}
-- Page background: bg-background. Cards/panels: bg-surface border border-border rounded-lg shadow-sm.
-  Primary buttons: bg-primary text-primary-foreground rounded-md. Body text: text-foreground; secondary: text-muted.
-- Brand colours do not support opacity modifiers (no bg-primary/50). Never hardcode hex colours or inline colour styles.
-- Raw Tailwind palette colours (e.g. bg-emerald-100) are fine for data-visualisation accents, status chips and
-  when the user explicitly asks for a colourful design; otherwise prefer the brand utilities.
-- The canvas is auto-sized to its content: do not use min-h-screen or fixed viewport heights.
-
-REGISTERED CAPABILITIES:
-${reg}
-
-Each data source lists its fields. Each action lists its args — pass exactly those.`;
-}
-
-export function buildUserPrompt(message, currentUI) {
-  const cur = currentUI ? String(currentUI) : '(none yet)';
-  return `User request: ${message}
-
-For reference, the current UI code is:
-\`\`\`
-${cur}
-\`\`\`
-
-Generate the new UI (or, if the request needs a capability that isn't registered, set code to null
-and explain in reply). Respond with ONLY the JSON object.`;
-}
-
-/** Robustly pull the JSON object out of the model's response. */
-export function extractJson(text) {
-  if (!text) return null;
-  let candidate = text.trim();
-  const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) candidate = fence[1].trim();
-  try {
-    const v = JSON.parse(candidate);
-    return v && typeof v === 'object' ? v : null;
-  } catch (e) {
-    const start = candidate.indexOf('{');
-    const end = candidate.lastIndexOf('}');
-    if (start !== -1 && end !== -1 && end > start) {
-      try {
-        const v = JSON.parse(candidate.slice(start, end + 1));
-        return v && typeof v === 'object' ? v : null;
-      } catch (e2) {
-        return null;
-      }
-    }
-    return null;
-  }
-}

@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useRef, useState } from 'react';
 import { useVeneer } from './context';
+import { verifyLicenseToken, DEV_TOKEN, isLocalHost, hashRegistryShape } from '@veneer/core';
 
 const MAX_HISTORY_TURNS = 20;
 
@@ -15,9 +16,15 @@ const MAX_HISTORY_TURNS = 20;
  * a route you create with `createVeneerHandler` from @veneer/server or point at Veneer Cloud),
  * swaps in the returned code through the provider (which persists it and mounts a fresh sandbox),
  * and records the assistant's reply. The registry is never sent: the server owns it.
+ *
+ * Licensing: a response is accepted only with a valid Veneer license token (signed by Veneer,
+ * verified here against the embedded public keys). The unsigned DEV token issued by
+ * `createVeneerHandler({ license: false })` is accepted on localhost only. Pass
+ * `requireLicense: false` to skip the check (e.g. in tests); this is a licensing control, not a
+ * security boundary.
  */
-export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fetchImpl } = {}) {
-  const { ui, setUi, reset: resetUi, violation, clearViolation } = useVeneer();
+export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fetchImpl, requireLicense = true, publicKeys } = {}) {
+  const { ui, setUi, reset: resetUi, violation, clearViolation, registry } = useVeneer();
   const [history, setHistory] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -55,7 +62,12 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
           const msg = json && typeof json.error === 'string' ? json.error : `The design service returned an error (${res.status}).`;
           setError(msg);
           setHistory((h) => [...h, { role: 'assistant', content: msg, error: true }]);
-          outcome = { ok: false, error: msg };
+          outcome = { ok: false, error: msg, code: json && json.code };
+        } else if (requireLicense && !(await isLicensed(json.token, registry, publicKeys))) {
+          const msg = 'This response was not licensed by Veneer, so it was not applied.';
+          setError(msg);
+          setHistory((h) => [...h, { role: 'assistant', content: msg, error: true }]);
+          outcome = { ok: false, error: msg, code: 'unlicensed' };
         } else {
           const changed = typeof json.code === 'string' && json.code.trim().length > 0;
           if (changed) {
@@ -76,7 +88,7 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
       setBusy(false);
       return outcome;
     },
-    [busy, history, ui, endpoint, headers, fetchImpl, setUi]
+    [busy, history, ui, endpoint, headers, fetchImpl, setUi, requireLicense, publicKeys, registry]
   );
 
   const cancel = useCallback(() => {
@@ -118,4 +130,13 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
     clearViolation,
     currentUI: ui,
   };
+}
+
+async function isLicensed(token, registry, publicKeys) {
+  if (token === DEV_TOKEN) {
+    const host = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
+    return isLocalHost(host);
+  }
+  const v = await verifyLicenseToken(token, { registryHash: hashRegistryShape(registry), ...(publicKeys ? { publicKeys } : {}) });
+  return v.ok;
 }

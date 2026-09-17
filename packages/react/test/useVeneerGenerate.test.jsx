@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { VeneerProvider } from '../src/context.js';
 import { useVeneerGenerate } from '../src/useVeneerGenerate.js';
+import { generateKeyPair, importPrivateKey, signLicenseToken, hashRegistryShape } from '@veneer/core';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const registry = { dataSources: [{ id: 'tasks' }], actions: [{ id: 'createTask' }] };
@@ -28,7 +29,7 @@ function mount(hookOpts) {
   return () => ref.current;
 }
 
-const jsonResponse = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+const jsonResponse = (body, status = 200) => ({ ok: status < 400, status, json: async () => ({ token: 'dev', ...body }) });
 
 describe('useVeneerGenerate', () => {
   it('posts message/history/currentUI (never the registry), swaps in code, records reply and undo', async () => {
@@ -110,5 +111,40 @@ describe('useVeneerGenerate', () => {
     expect(hook().currentUI).toBe('DEFAULT');
     expect(hook().history).toEqual([]);
     expect(hook().canUndo).toBe(false);
+  });
+});
+
+describe('license tokens', () => {
+  it('accepts a signed token for this registry, rejects unsigned/foreign ones off localhost', async () => {
+    const kp = await generateKeyPair();
+    const other = await generateKeyPair();
+    const priv = await importPrivateKey(kp.privateKey);
+    const good = await signLicenseToken({ sub: 'k', reg: hashRegistryShape(registry) }, priv);
+    const foreign = await signLicenseToken({ sub: 'k', reg: hashRegistryShape(registry) }, await importPrivateKey(other.privateKey));
+    const wrongReg = await signLicenseToken({ sub: 'k', reg: 'nope' }, priv);
+    const responses = [{ code: 'A', reply: 'a', token: good }, { code: 'B', reply: 'b', token: foreign }, { code: 'C', reply: 'c', token: wrongReg }, { code: 'D', reply: 'd' }];
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => responses.shift() }));
+    const hook = mount({ fetch: fetchImpl, publicKeys: [kp.publicKey] });
+    await act(async () => { await hook().generate('1'); });
+    expect(hook().currentUI).toBe('A');
+    let r;
+    await act(async () => { r = await hook().generate('2'); });
+    expect(r.code).toBe('unlicensed');
+    expect(hook().currentUI).toBe('A');
+    await act(async () => { r = await hook().generate('3'); });
+    expect(r.code).toBe('unlicensed');
+    await act(async () => { r = await hook().generate('4'); });
+    expect(r.code).toBe('unlicensed');
+  });
+  it('accepts the dev token on localhost only', async () => {
+    // jsdom's default URL is http://localhost:3000 → dev token accepted (the earlier tests rely on this)
+    expect(window.location.hostname).toBe('localhost');
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ code: 'X', reply: 'x', token: 'dev' }) }));
+    const hook = mount({ fetch: fetchImpl });
+    await act(async () => { await hook().generate('go'); });
+    expect(hook().currentUI).toBe('X');
+    const strict = mount({ fetch: fetchImpl, requireLicense: false });
+    await act(async () => { await strict().generate('go'); });
+    expect(strict().currentUI).toBe('X');
   });
 });

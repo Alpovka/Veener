@@ -1,0 +1,17 @@
+{
+  "name": "@veneer/cloud",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Reference implementation of Veneer Cloud: API-key verification, quota metering, license token signing, and hosted generation with the customer's own LLM key.",
+  "license": "SEE LICENSE IN ../server/LICENSE",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "bin": { "veneer-cloud": "./bin/serve.mjs" },
+  "scripts": { "test": "vitest run", "start": "node bin/serve.mjs" },
+  "dependencies": {
+    "@veneer/core": "0.3.0",
+    "@veneer/server": "0.3.0"
+  },
+  "devDependencies": { "vitest": "^5.0.0" }
+}
