@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: 'class',
-  content: ['./app/**/*.{js,jsx}', './components/**/*.{js,jsx}'],
+  content: ['./app/**/*.{js,jsx}'],
   theme: {
     extend: {
       colors: {
@@ -50,24 +50,9 @@ module.exports = {
           '0%,100%': { backgroundPosition: '0% 50%' },
           '50%': { backgroundPosition: '100% 50%' },
         },
-        'spin-slow': {
-          to: { transform: 'rotate(360deg)' },
-        },
-        shimmer: {
-          '0%': { backgroundPosition: '-200% 0' },
-          '100%': { backgroundPosition: '200% 0' },
-        },
-        marquee: {
-          '0%': { transform: 'translateX(0)' },
-          '100%': { transform: 'translateX(-50%)' },
-        },
         'pulse-ring': {
           '0%': { transform: 'scale(0.7)', opacity: '0.7' },
           '100%': { transform: 'scale(2.4)', opacity: '0' },
-        },
-        blink: {
-          '0%,100%': { opacity: '1' },
-          '50%': { opacity: '0' },
         },
       },
       animation: {
@@ -75,11 +60,7 @@ module.exports = {
         float: 'float 6s ease-in-out infinite',
         'float-slow': 'float-slow 9s ease-in-out infinite',
         'gradient-pan': 'gradient-pan 8s ease infinite',
-        'spin-slow': 'spin-slow 22s linear infinite',
-        shimmer: 'shimmer 2.5s linear infinite',
-        marquee: 'marquee 28s linear infinite',
         'pulse-ring': 'pulse-ring 3s ease-out infinite',
-        blink: 'blink 1.1s step-end infinite',
       },
     },
   },

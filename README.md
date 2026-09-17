@@ -148,7 +148,7 @@ See **`packages/react/README.md`** and **`packages/server/README.md`** for the A
 
 ## Running it
 
-You'll need **Node 20+** (`.nvmrc` pins 22) and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
+You'll need **Node 20+** (`.nvmrc` pins 24) and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
 
 ```bash
 # 1. Install the workspace (this also builds @veneer/react's dist) and run the tests

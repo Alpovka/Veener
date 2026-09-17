@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import { transform } from 'esbuild';
 
-// The SDK ships untranspiled JSX in .js files (consumers use transpilePackages / a bundler).
+// The source keeps JSX in .js files (the published dist is compiled by build.mjs).
 // Vite 8's oxc pipeline decides the language from the extension, so we pre-transform JSX here.
 function jsxInJs() {
   return {
