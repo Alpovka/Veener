@@ -1,6 +1,9 @@
 // Type declarations for @veneer/server (hand-maintained; the runtime is plain JavaScript).
 import type { Registry } from '@veneer/core';
 
+export { hashRegistryShape, verifyLicenseToken, LICENSE_PUBLIC_KEYS, FRAME_CSP, FRAME_SANDBOX } from '@veneer/core';
+export type { Registry, RegistryAction, RegistryDataSource, RegistryArg, RegistryField, LicenseClaims, LicenseVerification } from '@veneer/core';
+
 export type Intent = 'design' | 'chat' | 'clarify';
 export const INTENTS: Intent[];
 

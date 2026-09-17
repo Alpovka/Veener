@@ -14,6 +14,8 @@ import { createLicenseClient, createDevLicenseClient, LicenseError } from './lic
 
 export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS, classifyIntent, resolveIntent, INTENTS } from './generation.js';
 export { createLicenseClient, LicenseError, DEFAULT_LICENSE_API } from './license.js';
+// Shared helpers hosts may need server-side (the core workspace is bundled, not published).
+export { hashRegistryShape, verifyLicenseToken, LICENSE_PUBLIC_KEYS, FRAME_CSP, FRAME_SANDBOX } from '@veneer/core';
 
 export const DEFAULT_HANDLER_OPTIONS = {
   ...GENERATION_LIMITS,

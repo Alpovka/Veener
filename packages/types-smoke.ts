@@ -1,8 +1,8 @@
 // Compile-only check that the hand-written declarations describe a usable API.
 // Run with `npm run typecheck`; nothing here executes.
-import { VeneerProvider, VeneerFrame, useVeneerGenerate, type Registry } from '@veneer/react';
-import { createVeneerHandler, buildFrameResponse, classifyIntent } from '@veneer/server';
-import { verifyLicenseToken, resolveTheme } from '@veneer/core';
+// Only the two published packages are imported here: @veneer/core is internal and bundled.
+import { VeneerProvider, VeneerFrame, useVeneerGenerate, resolveTheme, type Registry } from '@veneer/react';
+import { createVeneerHandler, buildFrameResponse, classifyIntent, verifyLicenseToken } from '@veneer/server';
 
 const registry: Registry = {
   dataSources: [{ id: 'tasks', description: "The user's tasks.", fields: [{ name: 'id', type: 'string' }] }],

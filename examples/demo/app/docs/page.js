@@ -157,9 +157,9 @@ export default function DocsPage() {
                 <strong>Preview Notice:</strong> Package names and structure may still change before the public release. <Ic>@veneer/react</Ic> is MIT-licensed; <Ic>@veneer/server</Ic> requires a Veneer license key (or use Veneer Cloud as the endpoint).
               </Callout>
               <P>
-                <Ic>@veneer/core</Ic> is installed automatically as a dependency of both packages; you never
-                import it. The client ships compiled ESM and TypeScript declarations, so Next.js, Vite and
-                Remix need no extra configuration. React 18 or 19.
+                Two packages, nothing else: the client has no runtime dependencies besides React 18 or 19.
+                Both ship compiled ESM and TypeScript declarations, so Next.js, Vite and Remix need no
+                extra configuration.
               </P>
             </section>
 

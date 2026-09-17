@@ -5,14 +5,19 @@
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "sideEffects": false,
-  "main": "./src/index.js",
-  "types": "./index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./index.d.ts", "default": "./src/index.js" },
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./package.json": "./package.json"
   },
-  "files": ["src", "index.d.ts", "README.md", "LICENSE"],
-  "scripts": { "test": "vitest run" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepare": "node build.mjs",
+    "prepack": "node build.mjs",
+    "test": "vitest run"
+  },
   "keywords": ["veneer", "ai", "ui-generation", "llm", "nextjs"],
   "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/server" },
   "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/server#readme",
@@ -21,10 +26,11 @@
   "publishConfig": { "access": "public" },
   "dependencies": {
     "@babel/parser": "^7.29.0",
-    "@babel/traverse": "^7.29.0",
-    "@veneer/core": "0.3.0"
+    "@babel/traverse": "^7.29.0"
   },
   "devDependencies": {
+    "@veneer/core": "0.3.0",
+    "esbuild": "^0.28.2",
     "vitest": "^5.0.0"
   }
 }

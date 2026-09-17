@@ -1,7 +1,8 @@
 {
   "name": "@veneer/core",
   "version": "0.3.0",
-  "description": "Shared, framework-free pieces of the Veneer SDK: registry validation, the bridge's argument checks, the static scanner for generated code, the sandbox document, the theme contract and license-token verification.",
+  "private": true,
+  "description": "Internal, not published: the framework-free pieces shared by @veneer/react and @veneer/server (registry validation, bridge argument checks, the static scanner, the sandbox document, the theme contract, license-token verification). Each published package bundles this at build time.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -13,14 +14,8 @@
     "./bridge": "./src/bridge.js",
     "./package.json": "./package.json"
   },
-  "files": ["src", "index.d.ts", "README.md", "LICENSE"],
   "scripts": { "test": "vitest run" },
-  "keywords": ["veneer", "sandbox", "ui-generation"],
-  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/core" },
-  "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/core#readme",
-  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
   "engines": { "node": ">=20" },
-  "publishConfig": { "access": "public" },
   "devDependencies": {
     "@babel/parser": "^7.29.0",
     "@babel/standalone": "7.29.8",

@@ -10,5 +10,12 @@
     "jsx": "react-jsx",
     "types": []
   },
-  "include": ["packages/core/index.d.ts", "packages/react/index.d.ts", "packages/server/index.d.ts", "packages/types-smoke.ts"]
+  "include": [
+    "packages/core/index.d.ts",
+    "packages/react/index.d.ts",
+    "packages/server/index.d.ts",
+    "packages/react/dist/index.d.ts",
+    "packages/server/dist/index.d.ts",
+    "packages/types-smoke.ts"
+  ]
 }

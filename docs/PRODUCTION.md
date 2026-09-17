@@ -15,7 +15,7 @@ node packages/cloud/bin/keygen.mjs
 
 1. Store `VENEER_SIGNING_KEY` in the secret manager of the license service. Never in git.
 2. Replace the placeholder in `LICENSE_PUBLIC_KEYS` with the printed public key and release
-   `@veneer/core` + `@veneer/react`. Clients verify tokens offline against that list.
+   `@veneer/react` and `@veneer/server` (the key list is bundled into both). Clients verify tokens offline against that list.
 3. Rotation: generate a second pair, **add** its public key to the list, ship a client release,
    wait until old clients are gone, then switch `VENEER_SIGNING_KEY` and later remove the old key.
    Tokens live 26 hours, so a switch is safe once the new public key is deployed.
@@ -42,13 +42,14 @@ request-size cap at the edge as well; the in-process ones are per instance.
 
 ```bash
 npm run typecheck && npm test && npm run test:e2e
-(cd packages/core   && npm publish)   # MIT
-(cd packages/react  && npm publish)   # MIT, prepack builds dist/
-(cd packages/server && npm publish)   # commercial license
+(cd packages/react  && npm publish)   # MIT, prepack builds dist/ (core bundled in)
+(cd packages/server && npm publish)   # commercial license, prepack builds dist/ (core bundled in)
 ```
 
-Publish `core` first (the others pin its exact version). The `@veneer` npm scope must be owned by
-the company account; `publishConfig.access` is `public` on all three.
+Exactly two packages are published; `packages/core` is private and bundled into both. The
+`@veneer` npm scope must be owned by the company account; `publishConfig.access` is `public` on
+both. Decide the spelling (`@veneer` vs `@veener`) before the first publish: npm names are
+permanent. Both scopes were free on 2026-09-17; the unscoped name `veneer` is taken.
 
 ## 4. Demo site (Vercel)
 

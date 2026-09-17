@@ -28,9 +28,9 @@ This repo is an npm workspace:
 
 ```
 veneer/
-├── packages/core/     # @veneer/core   (MIT)  shared validators, scanner, frame document, theme, token verification
-├── packages/react/    # @veneer/react  (MIT)  VeneerProvider, VeneerFrame, useVeneerGenerate (built to dist/ by esbuild)
-├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client
+├── packages/core/     # internal, not published: validators, scanner, frame document, theme, token verification
+├── packages/react/    # @veneer/react  (MIT)        VeneerProvider, VeneerFrame, useVeneerGenerate — bundles core
+├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client — bundles core
 ├── packages/cloud/    # @veneer/cloud  reference Veneer Cloud: API keys, quota, token signing, hosted generation
 └── examples/demo/     # the Next.js demo site (consumes the packages from the workspace)
 ```
@@ -133,9 +133,10 @@ const actions = {
 </VeneerProvider>
 ```
 
-Install is one command: `npm install @veneer/react @veneer/server`. `@veneer/core` comes along as a
-dependency of both (like `scheduler` does for `react-dom`); you never import it directly. The client
-ships compiled JavaScript plus TypeScript declarations, so no bundler configuration is needed.
+Install is one command: `npm install @veneer/react @veneer/server`. Those are the only two published
+packages: the client (MIT, browser) and the endpoint (commercial, server). Both ship compiled
+JavaScript plus TypeScript declarations, so no bundler configuration is needed. The shared internals
+live in the private `packages/core` workspace and are bundled into each at build time.
 
 The registry's plain-English descriptions are handed to the model so it knows what it can do; the
 registry's ids are what the bridge enforces at runtime. Generated code reads data via

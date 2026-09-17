@@ -1,7 +1,7 @@
 # Changelog
 
-All notable changes to the Veneer packages. Versions follow semver; the three published packages
-(`@veneer/core`, `@veneer/react`, `@veneer/server`) are released together with the same version.
+All notable changes to the Veneer packages. Versions follow semver; the two published packages
+(`@veneer/react`, `@veneer/server`) are released together with the same version.
 
 ## Unreleased
 
@@ -31,9 +31,14 @@ All notable changes to the Veneer packages. Versions follow semver; the three pu
 
 ### Changed
 
-- `@veneer/react` now publishes a compiled ESM bundle (`dist/`) with TypeScript declarations;
-  `transpilePackages` is no longer needed. `@veneer/core` and `@veneer/server` ship declarations
-  too. All packages declare `engines.node >= 20` and MIT `LICENSE` files where applicable.
+- Exactly two packages are published: `@veneer/react` (MIT) and `@veneer/server` (commercial).
+  `@veneer/core` is now a private workspace bundled into both at build time; hosts that need its
+  helpers get them re-exported (`runBridgeAction`, `resolveTheme`, … from react;
+  `hashRegistryShape`, `verifyLicenseToken`, … from server).
+- Both published packages ship compiled ESM bundles (`dist/`, esbuild) with TypeScript
+  declarations; `transpilePackages` is no longer needed. `@veneer/react` has no runtime
+  dependencies besides React. All packages declare `engines.node >= 20`; MIT `LICENSE` files
+  where applicable.
 - Demo: security headers (CSP, HSTS, nosniff, referrer and permissions policies) on every page
   except the sandbox document; canonical site URL from `NEXT_PUBLIC_SITE_URL`; the API route
   declares `maxDuration = 60`; the chat requires a license unless

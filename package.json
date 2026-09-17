@@ -10,11 +10,11 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "npm run build -w @veneer/react",
+    "build": "npm run build -w @veneer/react -w @veneer/server",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e -w @veneer/react",
     "typecheck": "tsc -p tsconfig.types.json",
-    "build:demo": "npm run build -w @veneer/react && npm run build -w veneer-demo"
+    "build:demo": "npm run build && npm run build -w veneer-demo"
   },
   "devDependencies": {
     "@types/react": "^18.3.31",

@@ -10,13 +10,13 @@ or mount `createCloudApp()` in a Next.js / Hono / Cloudflare handler).
 | `GET /v1/health` | monitoring | `{ ok: true }` |
 
 Tokens are Ed25519 signatures over `{ sub, plan, evt: 'generation', reg, iat, exp }` (26 h
-lifetime); clients verify them offline with the public keys embedded in `@veneer/core`.
+lifetime); clients verify them offline with the public keys embedded in the SDK (`LICENSE_PUBLIC_KEYS` in `packages/core`, bundled into both published packages).
 
 **The public key currently in the repository is a placeholder without a saved private half.**
 Before the first production deployment run `node bin/keygen.mjs`, store the printed
 `VENEER_SIGNING_KEY` in a secret manager, and replace `LICENSE_PUBLIC_KEYS` with the printed
 public key. Rotation runbook: generate a new pair → *add* its public key to the list → release
-`@veneer/core`/`@veneer/react` → wait for old clients to update → switch `VENEER_SIGNING_KEY` →
+`@veneer/react` and `@veneer/server` → wait for old clients to update → switch `VENEER_SIGNING_KEY` →
 remove the old public key in a later release. See `docs/PRODUCTION.md`.
 
 Only successful generations are metered: chat turns, clarifying questions, refusals and provider

@@ -15,8 +15,8 @@ that was not registered.
 
 ## Scope
 
-In scope: `@veneer/core`, `@veneer/react`, `@veneer/server`, the reference `@veneer/cloud`, and the
-sandbox document they serve.
+In scope: `@veneer/react`, `@veneer/server` (including the bundled `packages/core` internals), the
+reference `@veneer/cloud`, and the sandbox document they serve.
 
 Reports about the documented residual risks are welcome only when they show something new. The
 known limits are listed in the root README (self-navigation of a sandboxed frame, host CSP
