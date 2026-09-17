@@ -17,16 +17,27 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
   const S = useMemo(() => makeStyles(theme, resolvedMode === 'dark'), [theme, resolvedMode]);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
+  // Label the spinner: "Designing…" for a change request, "Thinking…" for a chat/question turn.
+  const [pendingVerb, setPendingVerb] = useState('Designing');
+  // Only trap wheel/scroll inside the message list when it actually overflows; otherwise let the
+  // page scroll normally while the cursor is over the (short) conversation.
+  const [messagesScrollable, setMessagesScrollable] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setMessagesScrollable(el.scrollHeight > el.clientHeight + 1);
   }, [history, open, busy, violation]);
 
-  async function send() {
-    const message = input.trim();
+  // Send a message straight to the AI. Called from the input (Enter / Send) and, with the text
+  // passed in, from a suggestion chip — clicking a suggestion sends it immediately.
+  async function submit(text) {
+    const message = (typeof text === 'string' ? text : input).trim();
     if (!message || busy) return;
     setInput('');
+    setPendingVerb(looksLikeDesign(message) ? 'Designing' : 'Thinking');
     await generate(message);
   }
 
@@ -112,7 +123,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
             </div>
           </div>
 
-          <div ref={scrollRef} data-lenis-prevent style={S.messages}>
+          <div ref={scrollRef} {...(messagesScrollable ? { 'data-lenis-prevent': '' } : {})} style={S.messages}>
             {history.length === 0 && (
               <div style={S.intro}>
                 Describe how you want this page to look, or just ask a question. The canvas only
@@ -121,7 +132,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
                   {tips.map((s) => (
                     <button
                       key={s}
-                      onClick={() => setInput(s)}
+                      onClick={() => submit(s)}
                       disabled={busy}
                       style={{
                         ...S.suggestion,
@@ -149,21 +160,21 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
                 </button>
               </div>
             )}
-            {busy && <div style={S.aiMsg}>Designing…</div>}
+            {busy && <div style={S.aiMsg}>{pendingVerb}…</div>}
           </div>
 
           <div style={S.inputRow}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && send()}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
               placeholder="e.g. make this a kanban board…"
               className="veneer-chat-input"
               style={S.input}
               disabled={busy}
             />
             <button
-              onClick={send}
+              onClick={() => submit()}
               disabled={busy || !input.trim()}
               style={{
                 ...S.sendBtn,
@@ -178,6 +189,14 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
       )}
     </>
   );
+}
+
+// Lightweight guess, only used to label the spinner while the request is in flight. The server's
+// intent gate is authoritative; this just picks "Designing…" vs "Thinking…" before the reply.
+const DESIGN_HINT =
+  /\b(make|change|turn|convert|add|remove|delete|hide|show|display|move|group|sort|filter|arrange|redesign|rebuild|build|create|design|render|kanban|calendar|board|dashboard|timeline|gallery|grid|list|table|cards?|columns?|rows?|layout|theme|dark|light|colou?r|font|bigger|smaller|wider|compact|spacing|header|title|button|badge|tabs?|sidebar|section)\b/i;
+function looksLikeDesign(text) {
+  return DESIGN_HINT.test(String(text || ''));
 }
 
 function violationText(v) {
