@@ -1,0 +1,21 @@
+{
+  "name": "@veneer/core",
+  "version": "0.3.0",
+  "description": "Shared, framework-free pieces of the Veneer SDK: registry validation, the bridge's argument checks, and the static scanner for generated code.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./scan": "./src/scan.js",
+    "./bridge": "./src/bridge.js"
+  },
+  "files": ["src", "README.md"],
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "@babel/parser": "^7.29.0",
+    "@babel/standalone": "7.29.8",
+    "@babel/traverse": "^7.29.0",
+    "vitest": "^5.0.0"
+  }
+}
