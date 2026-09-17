@@ -13,6 +13,7 @@ import traverseNs from '@babel/traverse';
 import { createScanner, registryIds } from '../scan.js';
 import { buildFrameHtml, FRAME_CSP, FRAME_SANDBOX } from '../frameRuntime.js';
 import { THEME_UTILITIES } from '../theme.js';
+import { classifyIntent, resolveIntent } from './intent.js';
 
 const traverse = typeof traverseNs === 'function' ? traverseNs : traverseNs.default;
 const scan = createScanner(parser, traverse);
@@ -21,6 +22,8 @@ const scan = createScanner(parser, traverse);
 export function scanGeneratedCode(code, registry) {
   return scan(code, registryIds(registry));
 }
+
+export { classifyIntent, INTENTS } from './intent.js';
 
 export const DEFAULT_HANDLER_OPTIONS = {
   maxHistory: 20,
@@ -163,7 +166,8 @@ export function createVeneerHandler(opts) {
       if (currentUI.length > o.maxCurrentUIChars) return json({ error: 'Current UI is too large.' }, 413);
 
       const history = sanitizeHistory(body.history, o);
-      const messages = [...history, { role: 'user', content: buildUserPrompt(message, currentUI) }];
+      const heuristic = classifyIntent(message, { history });
+      const messages = [...history, { role: 'user', content: buildUserPrompt(message, currentUI, heuristic) }];
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), o.timeoutMs);
@@ -176,10 +180,19 @@ export function createVeneerHandler(opts) {
 
       const parsed = extractJson(typeof raw === 'string' ? raw : '');
       if (!parsed) {
-        return json({ code: null, reply: "Sorry, I couldn't generate that. Try rephrasing." });
+        return json({ code: null, intent: 'chat', reply: "Sorry, I couldn't process that. Try rephrasing." });
       }
       const reply = parsed.reply != null ? String(parsed.reply) : '';
-      if (parsed.code == null || parsed.code === '') return json({ code: null, reply: reply || 'Done.' });
+
+      // Intent gate: the UI changes ONLY when the user asked for a change. The model labels its
+      // own answer; a cheap local classifier double-checks it, and the two must agree before any
+      // code is applied. Greetings, questions, opinions and feedback get a conversational reply.
+      const intent = resolveIntent({ message, modelIntent: parsed.intent, hasCode: parsed.code != null && parsed.code !== '', heuristic });
+      if (intent !== 'design') {
+        if (parsed.code != null && parsed.code !== '') log(new Error('model returned code for a non-design intent; dropped'), { intent, modelIntent: parsed.intent });
+        return json({ code: null, intent, reply: reply || (intent === 'clarify' ? 'Could you tell me a bit more about what you would like to change?' : 'Happy to help. Tell me how you would like the page to look.') });
+      }
+      if (parsed.code == null || parsed.code === '') return json({ code: null, intent, reply: reply || 'No changes made.' });
       const code = String(parsed.code);
       if (code.length > o.maxCurrentUIChars) {
         return json({ code: null, reply: 'That design came out too large to run safely. Try asking for something simpler.' });
@@ -190,11 +203,12 @@ export function createVeneerHandler(opts) {
         log(new Error('generated code failed the scan'), { violations: result.violations, key });
         return json({
           code: null,
+          intent,
           reply: friendlyScanReply(result.violations, registry),
           blocked: result.violations,
         });
       }
-      return json({ code, reply });
+      return json({ code, intent, reply });
     } catch (e) {
       log(e, { stage: 'handler' });
       const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));
@@ -241,8 +255,20 @@ export function buildSystemPrompt(registry, { brand } = {}) {
   const brandLine = brand && (brand.name || brand.tone)
     ? `\nThe host brand${brand.name ? ` is "${String(brand.name).slice(0, 80)}"` : ''}${brand.tone ? `; its tone is ${String(brand.tone).slice(0, 200)}` : ''}.`
     : '';
-  return `You are Veneer, a UI generator embedded in a host web application. The end user will
-describe how they want the current page to look, and you generate the UI for it.
+  return `You are Veneer, an assistant embedded in a host web application. You can redesign the current page
+on request, and you can simply talk: answer questions about the design, give your opinion, explain
+what you can do, or respond to a greeting.
+
+FIRST DECIDE THE USER'S INTENT, then answer accordingly:
+- "design": the user asks to create or change the UI ("make this a kanban", "add a due-date column",
+  "darker cards", "undo the last change"). Generate the UI.
+- "chat": anything that is not a change request — greetings, thanks, small talk, questions ("what can
+  you do?", "why is this task red?"), opinions or feedback ("what do you think of this design?",
+  "I like it", "hmm, not sure"). Answer helpfully and briefly in "reply"; set "code" to null. NEVER
+  change the UI on a chat turn, even if you have ideas: offer them and wait to be asked.
+- "clarify": the request is a change but too ambiguous to act on ("make it better", "fix it").
+  Ask ONE short question in "reply"; set "code" to null.
+When in doubt between design and chat, choose chat. Changing the UI uninvited is worse than asking.
 
 You have FULL creative freedom over layout and design — invent any layout the request calls for
 (kanban board, calendar, dashboard, timeline, gallery, anything). But you operate inside a hard
@@ -251,9 +277,12 @@ host page. Your ONLY connection to the app is a small in-frame API.
 
 RESPONSE FORMAT — respond with ONLY a single JSON object, no prose, no markdown fences:
 {
-  "code": "<a self-contained React component, as a string>",
+  "intent": "design" | "chat" | "clarify",
+  "code": "<a self-contained React component, as a string; null unless intent is design>",
   "reply": "<one or two friendly sentences to show the user>"
 }
+For "chat" you may write a slightly longer reply (up to a short paragraph) when the question needs it.
+You can see the current UI code below; use it to answer questions about the design concretely.
 
 THE CODE YOU WRITE:
 - Is plain JSX. These globals are already available — DO NOT import anything, DO NOT use export:
@@ -297,17 +326,21 @@ ${reg}
 Each data source lists its fields. Each action lists its args — pass exactly those.`;
 }
 
-export function buildUserPrompt(message, currentUI) {
+export function buildUserPrompt(message, currentUI, heuristic) {
   const cur = currentUI ? String(currentUI) : '(none yet)';
-  return `User request: ${message}
+  const hint = heuristic && heuristic.intent && heuristic.intent !== 'unknown'
+    ? `\n(A local classifier read this message as "${heuristic.intent}" with ${heuristic.confidence} confidence. Use your own judgement, but do not change the UI unless the user clearly asked for a change.)`
+    : '';
+  return `User message: ${message}${hint}
 
 For reference, the current UI code is:
 \`\`\`
 ${cur}
 \`\`\`
 
-Generate the new UI (or, if the request needs a capability that isn't registered, set code to null
-and explain in reply). Respond with ONLY the JSON object.`;
+Decide the intent. If it is a design request, generate the new UI (or, if it needs a capability that
+isn't registered, set code to null and explain). If it is a question, comment or greeting, just reply.
+Respond with ONLY the JSON object.`;
 }
 
 /** Robustly pull the JSON object out of the model's response. */

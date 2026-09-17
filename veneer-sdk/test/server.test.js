@@ -59,7 +59,7 @@ describe('createVeneerHandler', () => {
     expect(call.system).toBe(buildSystemPrompt(registry));
     expect(call.system).not.toContain('deleteTask');
     expect(call.messages.map((m) => m.role)).toEqual(['assistant', 'user']);
-    expect(call.messages[1].content).toContain('User request: make it a board');
+    expect(call.messages[1].content).toContain('User message: make it a board');
     expect(call.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -122,7 +122,7 @@ describe('createVeneerHandler', () => {
 
   it('handles code:null, unparsable output, and oversized code', async () => {
     const mk = (out) => createVeneerHandler({ registry, rateLimit: false, maxCurrentUIChars: 100, generate: async () => out });
-    expect(await (await mk(JSON.stringify({ code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, reply: 'Nope' });
+    expect(await (await mk(JSON.stringify({ intent: 'design', code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, intent: 'design', reply: 'Nope' });
     expect((await (await mk('total garbage')(req({ message: 'x' }))).json()).code).toBeNull();
     const big = await (await mk(JSON.stringify({ code: 'render(<b>' + 'x'.repeat(200) + '</b>)', reply: 'ok' }))(req({ message: 'x' }))).json();
     expect(big.code).toBeNull();

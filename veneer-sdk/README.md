@@ -105,10 +105,10 @@ export const GET = () => buildFrameResponse({ frameAncestors: "'self'" });
 
 | Export | What it does |
 | --- | --- |
-| `createVeneerHandler({ registry, generate, brand, rateLimit, allowedOrigins, authorize, onError, maxHistory, maxMessageChars, maxCurrentUIChars, maxBodyBytes, timeoutMs })` | Returns `(request) => Promise<Response>`. Builds the prompt from **your** registry (the client's copy is ignored), requires `Content-Type: application/json` and same-origin Fetch Metadata, caps every input, rate-limits per IP (`rateLimit` may be `{ limit, windowMs }`, an `async (key) => boolean` backed by your store, or `false`), aborts the model call after `timeoutMs`, statically scans the generated code and refuses anything that reaches outside the registry, and never returns provider error text. |
+| `createVeneerHandler({ registry, generate, brand, rateLimit, allowedOrigins, authorize, onError, maxHistory, maxMessageChars, maxCurrentUIChars, maxBodyBytes, timeoutMs })` | Returns `(request) => Promise<Response>` with `{ code, intent, reply }`. Applies the intent gate (below). Builds the prompt from **your** registry (the client's copy is ignored), requires `Content-Type: application/json` and same-origin Fetch Metadata, caps every input, rate-limits per IP (`rateLimit` may be `{ limit, windowMs }`, an `async (key) => boolean` backed by your store, or `false`), aborts the model call after `timeoutMs`, statically scans the generated code and refuses anything that reaches outside the registry, and never returns provider error text. |
 | `buildFrameResponse({ frameAncestors })` | The sandbox document as a `Response` with a header CSP (including `sandbox` and `frame-ancestors`), `Referrer-Policy: no-referrer`. |
 | `scanGeneratedCode(code, registry)` | `{ ok, violations }` for a code string. |
-| `buildSystemPrompt(registry)`, `buildUserPrompt(message, currentUI)`, `extractJson(text)` | Prompt building blocks, if you run your own pipeline. |
+| `buildSystemPrompt(registry)`, `buildUserPrompt(message, currentUI, heuristic)`, `extractJson(text)`, `classifyIntent(message)` | Prompt building blocks and the local intent classifier, if you run your own pipeline. |
 | `checkRequestOrigin(request, opts)`, `createMemoryRateLimiter(opts)`, `clientKey(request)` | Reusable guards for your other routes. |
 
 ## Branding
@@ -161,6 +161,21 @@ How it works:
 Limits: brand colours do not support Tailwind opacity modifiers (`bg-primary/50`); overlays
 inside the canvas are clipped to the iframe rectangle; the frame cannot use your React components
 (it gets your tokens, not your component library).
+
+## Intent gate: the canvas changes only when asked
+
+The assistant is conversational. "Hey, how are you?", "what do you think of this design?", "what can
+you do?" or "thanks!" get a reply and leave the canvas untouched; "make this a kanban board" changes
+it; "make it better" gets one clarifying question. Two signals decide, and both must agree before
+any code is applied:
+
+1. the model labels its answer (`"intent": "design" | "chat" | "clarify"`), and
+2. a local, rule-based classifier reads the message (`classifyIntent`, exported from
+   `veneer-sdk/server` for your own UI hints or tests).
+
+If the model says "design" but the local read is confidently "chat" (an opinion question, a
+greeting), the code is dropped and logged via `onError` so prompts can be tuned. Responses carry
+`intent`, so a chat UI can show "Canvas updated" only when something changed.
 
 ## The in-frame API (what generated code may call)
 
