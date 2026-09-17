@@ -59,7 +59,7 @@ permanent. Both scopes were free on 2026-09-17; the unscoped name `veneer` is ta
   `NEXT_PUBLIC_VENEER_REQUIRE_LICENSE=false` (the last runs the demo unlicensed; generated code is
   accepted without a token). `NEXT_PUBLIC_SITE_URL` for canonical metadata. `RESEND_API_KEY` and
   the optional waitlist variables.
-- Node 24 (`.nvmrc`; the demo's `engines.node` tells Vercel the same). The API route declares `maxDuration = 60`; the model call times out at 45 s.
+- Node 22 (`.nvmrc`). The API route declares `maxDuration = 60`; the model call times out at 45 s.
 
 ## 5. Before the first customer
 
