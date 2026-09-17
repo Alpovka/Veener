@@ -7,6 +7,12 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
 
 ### Fixed
 
+- The sandbox frame loaded Tailwind from a patch-version Play CDN path
+  (`cdn.tailwindcss.com/3.4.19`). The Play CDN does not guarantee every such path is served, and a
+  miss failed silently (no SRI) and left every generated view completely unstyled while React still
+  rendered. The frame now loads Tailwind from its documented origin, and reports an `error`
+  (kind `style`) to the host if the runtime is still missing at init instead of failing silently.
+
 - `useVeneerGenerate` no longer rejects chat and clarification turns for lacking a license token;
   only responses that carry code are checked. Rapid double submits are guarded synchronously.
   The unlicensed DEV token now produces an actionable message when used off localhost, and the

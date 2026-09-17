@@ -3,14 +3,19 @@ import { buildFrameSrcDoc, FRAME_CSP, FRAME_SANDBOX, RUNTIME_SCRIPTS, PROTOCOL_V
 
 describe('frame document', () => {
   const html = buildFrameSrcDoc();
-  it('pins every runtime script by exact URL and lists only those in script-src', () => {
+  it('lists every runtime script by exact URL in script-src, hashed ones version-pinned', () => {
     for (const s of RUNTIME_SCRIPTS) {
-      expect(s.url).toMatch(/^https:\/\/(unpkg\.com\/(@[^/]+\/)?[^@/]+@\d+\.\d+\.\d+\/|cdn\.tailwindcss\.com\/\d+\.\d+\.\d+$)/);
+      // npm-served scripts are pinned to an exact version (and carry SRI); the Tailwind Play CDN
+      // build is not on npm and is loaded from its documented origin (see frameRuntime.js).
+      const pattern = s.integrity
+        ? /^https:\/\/unpkg\.com\/(@[^/]+\/)?[^@/]+@\d+\.\d+\.\d+\//
+        : /^https:\/\/cdn\.tailwindcss\.com$/;
+      expect(s.url, s.url).toMatch(pattern);
       expect(FRAME_CSP).toContain(s.url);
       expect(html).toContain(`src="${s.url}"`);
     }
+    // Every unpkg script is version-pinned (never the bare origin).
     expect(FRAME_CSP).not.toMatch(/script-src[^;]*https:\/\/unpkg\.com(\s|;|$)/);
-    expect(FRAME_CSP).not.toMatch(/script-src[^;]*https:\/\/cdn\.tailwindcss\.com(\s|;|$)/);
   });
   it('carries SRI + crossorigin for every script that has a hash', () => {
     const hashed = RUNTIME_SCRIPTS.filter((s) => s.integrity);
@@ -53,5 +58,12 @@ describe('frame document', () => {
     expect(m).toContain('@font-face');
     expect(FRAME_CSP).toContain("font-src data:");
     expect(FRAME_CSP).not.toContain('fonts.gstatic');
+  });
+  it('reports a non-fatal diagnostic (never a teardown) when the Tailwind runtime is absent', () => {
+    const m = html.match(/<script>([\s\S]*)<\/script>\s*<\/body>/)[1];
+    expect(m).toContain('var styleRuntimeReady = !!window.tailwind;');
+    // A missing style runtime is surfaced as an `error`, which the host only logs — it must not be
+    // a `scan-violation`, which would quarantine the code and tear the canvas down.
+    expect(m).toMatch(/if \(!styleRuntimeReady\) send\(\{ type: 'error', kind: 'style'/);
   });
 });

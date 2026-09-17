@@ -55,10 +55,11 @@ product that hides them is not one.
    popups, downloads or dialogs, and cannot navigate the host page.
 
 2. **No network.** The frame's Content-Security-Policy is `default-src 'none'; connect-src 'none';
-   form-action 'none'`, and `script-src` lists the four runtime scripts (React, ReactDOM, Babel,
-   Tailwind) by exact, version-pinned URL with SRI hashes where the CDN serves npm bytes. Generated
-   code cannot `fetch`, XHR, open a WebSocket, send a beacon, load an image or font, or import any
-   other script.
+   form-action 'none'`, and `script-src` lists the four runtime scripts by exact URL only. React,
+   ReactDOM and Babel are pinned to an exact npm version with SRI hashes; Tailwind's Play CDN build
+   is not published to npm, so it loads from its documented origin without a hash (if it fails to
+   load the view still renders, just unstyled, and the frame reports it). Generated code cannot
+   `fetch`, XHR, open a WebSocket, send a beacon, load an image or font, or import any other script.
 
 3. **Validated bridge over a private channel.** The host hands the frame a `MessagePort` once, in
    an `init` message, and never listens to the frame's window messages again. Every action request
