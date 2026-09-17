@@ -13,8 +13,9 @@ sources and actions, each described in plain English — and pass in the real im
 
 Your end users then open an AI chat and just *describe how they want the page to look*. The AI
 has **full creative freedom over the UI**: it generates real component code. That code runs in a
-**securely sandboxed iframe** whose only connection to your app is a message bridge exposing
-exactly the capabilities you registered — nothing else.
+**JavaScript interpreter inside a Web Worker** — a sandbox with no browser in it — and the only
+thing it can do is describe what to draw and call a bridge exposing exactly the capabilities you
+registered. Your page redraws that description through an allowlist, as real DOM in your page.
 
 So the AI can invent any layout it likes — a kanban board, a calendar, a dashboard, a timeline —
 but a generated UI **can only ever trigger actions that were registered.** If there is no
@@ -28,8 +29,8 @@ This repo is an npm workspace:
 
 ```
 veneer/
-├── packages/core/     # internal, not published: validators, scanner, frame document, theme, token verification
-├── packages/react/    # @veneer/react  (MIT)        VeneerProvider, VeneerFrame, useVeneerGenerate — bundles core
+├── packages/core/     # internal, not published: validators, scanner, theme, token verification, legacy frame document
+├── packages/react/    # @veneer/react  (MIT)        VeneerProvider, VeneerCanvas (+ dist/veneer-worker.js), useVeneerGenerate
 ├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client — bundles core
 ├── packages/cloud/    # @veneer/cloud  reference Veneer Cloud: API keys, quota, token signing, hosted generation
 └── examples/demo/     # the Next.js demo site (consumes the packages from the workspace)
@@ -50,40 +51,53 @@ This is the part that matters. Three enforcement layers, a static scan, and a wa
 described with what it actually stops; the residual risks are listed too, because a security
 product that hides them is not one.
 
-1. **Opaque origin.** Generated code renders inside `<iframe sandbox="allow-scripts allow-forms">`
-   with **no** `allow-same-origin`. It cannot read the host's cookies, storage or DOM, cannot open
-   popups, downloads or dialogs, and cannot navigate the host page.
+1. **An interpreter, not a browser.** Generated code runs in QuickJS (a JavaScript engine compiled
+   to WebAssembly) inside a Web Worker. The interpreter's global scope holds React (Preact), a fake
+   `document` that records drawing operations, and the `veneer` API — nothing else. `window`,
+   `fetch`, `location`, cookies, storage, `XMLHttpRequest`, `WebAssembly`, `importScripts` do not
+   exist there; this is not a blocklist, they were never created. Only JSON strings cross the
+   boundary in either direction. Every entry into the interpreter (start-up, an event, a timer, an
+   action result) runs under a CPU deadline enforced by the engine's interrupt handler, with a
+   memory cap and a stack cap.
 
-2. **No network.** The frame's Content-Security-Policy is `default-src 'none'; connect-src 'none';
-   form-action 'none'`, and `script-src` lists the four runtime scripts by exact URL only. React,
-   ReactDOM and Babel are pinned to an exact npm version with SRI hashes; Tailwind's Play CDN build
-   is not published to npm, so it loads from its documented origin without a hash (if it fails to
-   load the view still renders, just unstyled, and the frame reports it). Generated code cannot
-   `fetch`, XHR, open a WebSocket, send a beacon, load an image or font, or import any other script.
+2. **Allowlisted rendering.** The interpreter never draws; it emits a description (`insert`, `text`,
+   `attr`, `style`, `on`…). `VeneerCanvas` replays that with the host's own React through an
+   allowlist: elements are allowed, demoted (`<a>` → `<span>`) or dropped (`<img>`, `<iframe>`,
+   `<script>`, `<style>`, `<video>`, `<object>`…); attributes map to a fixed list (no `href`, `src`,
+   `action`, `on*`, `contenteditable`, `popover`…); ids are namespaced so they cannot collide with
+   or target the host's; inline styles pass a grammar (no `url()`, no `var()` outside the brand
+   variables, `position: fixed` → `absolute`, `z-index` ≤ 100); class names pass a grammar and are
+   prefixed (`grid` → `v:grid`). Tailwind v4 is compiled **inside the worker** for exactly the class
+   names used, every rule is re-rooted under `.veneer-canvas`, and the stylesheet is installed via
+   `adoptedStyleSheets`, so generated CSS cannot restyle the host and host CSS resets cannot leak in.
+   The canvas root is `isolation: isolate` with a clip, so nothing can be painted over your page.
 
-3. **Validated bridge over a private channel.** The host hands the frame a `MessagePort` once, in
-   an `init` message, and never listens to the frame's window messages again. Every action request
-   on that port is checked against the registry — registered id, declared args only, required args,
-   type checks inferred from your `type` text (or your own `validate(args)`), no prototype-polluting
-   keys, size/depth caps, a rate limit — *before* your implementation runs. Only declared return
-   values go back, and only registered data sources are pushed in.
+3. **Validated bridge.** Every `veneer.action` call is checked against the registry — registered
+   id, declared args only, required args, type checks inferred from your `type` text (or your own
+   `validate(args)`), no prototype-polluting keys, size/depth caps, a rate limit — *before* your
+   implementation runs. Only declared return values go back, and only registered data sources are
+   pushed in. The interpreter checks the id first too, so an unregistered action never leaves it.
 
 Then two more things, which are not boundaries but make the boundaries hard to reach:
 
-- **Static scan before eval.** The frame parses the generated code and refuses anything that touches
-  `window`, `document`, `location`, network globals, `this`, imports, `dangerouslySetInnerHTML`, or a
+- **Static scan before eval.** The generated code is parsed and refused if it touches `window`,
+  `document`, `location`, network globals, `this`, imports, `dangerouslySetInnerHTML`, or a
   non-literal/unregistered `veneer.action`/`veneer.data` id. The server runs the same scan before
   returning code, so the chat can explain *why* instead of showing a broken canvas.
-- **Watchdog.** Every UI runs in a fresh document. If that document is ever replaced (a `load` event
-  after init) or stops answering heartbeats, the host closes the channel, quarantines the code,
-  restores the default UI and calls `onSecurityViolation`.
+- **Watchdog.** Every UI gets a fresh worker. A hot loop is interrupted at its deadline (three in a
+  row end the UI); a native allocation loop the interrupt cannot reach is caught by heartbeats: the
+  host terminates the worker, quarantines the code, restores the default UI and calls
+  `onSecurityViolation`. `Worker.terminate()` is the last word, and nothing generated code does can
+  delay it.
 
-**Known limit.** A sandboxed frame may always navigate *itself*, and no browser lets the host
-forbid that. Veneer neutralises anchor clicks and form posts, rejects `location` in the scan, and
-detects and shuts down any navigation, but a deliberate bypass could encode data *already inside
-the frame* into that first URL. Push only data you would show that user on screen anyway. The other
-residuals (host CSP inheritance and the `frameSrc` fix, CPU hot loops, UI spoofing) are in
-`packages/react/README.md`.
+**Known limits.** Generated UI is real DOM in your page, so it can *look like* anything — a fake
+login form is a spoofing risk, exactly as it would be with any user-generated content; the
+canvas cannot submit or navigate, but treat what users type into generated views accordingly. Text
+is the only channel out of the interpreter (there is no network and no navigation), so data you
+push in can only reach the user's screen; still, push only registered sources you would show that
+user anyway. The worker compiles WebAssembly, so a host Content-Security-Policy needs
+`script-src 'wasm-unsafe-eval'` and `worker-src 'self'`. The legacy iframe engine (`VeneerFrame`)
+stays one more release for hosts that need it; its residuals are in `packages/react/README.md`.
 
 **The server owns the registry.** The client sends `{ message, history, currentUI }` only; the
 generator endpoint (`createVeneerHandler` from `@veneer/server`) builds the prompt from *its*
@@ -91,10 +105,10 @@ registry, requires same-origin JSON requests, caps sizes, rate-limits, times out
 the result. It is not an open LLM proxy.
 
 **Branding.** Pass `theme` to the provider (colours per mode, radii, fonts, shadows) and both the
-generated UI and the chat widget take the host brand: the tokens become `--veneer-*` variables in the
-sandbox, Tailwind utilities like `bg-primary` / `text-foreground` / `rounded-md` resolve to them, the
-model is told to use that vocabulary, fonts are inlined as data URIs, and `autoHeight` lets the canvas
-flow with the page.
+generated UI and your chat take the host brand: the tokens become `--veneer-*` variables on the
+canvas root, Tailwind utilities like `bg-primary` / `text-foreground` / `rounded-md` resolve to them,
+`dark:` follows the mode, and the model is told to use that vocabulary. Because generated UI is real
+DOM in your page, your fonts apply as they are and the canvas flows with the page.
 
 Customizations are **per-user and private**: the generated UI is stored in `localStorage` under a
 key you choose (`storageKey`, e.g. `veneer-ui:<userId>`). No sharing in this version.
@@ -129,8 +143,8 @@ const actions = {
 };
 
 <VeneerProvider registry={registry} actions={actions} data={{ tasks }} defaultUI={defaultUI}>
-  <VeneerFrame frameSrc="/veneer-frame" autoHeight />
-  <YourChatBox />   {/* any UI built on useVeneerGenerate(); the SDK ships no chat widget */}
+  <VeneerCanvas />   {/* generated UI renders here, as real DOM in your page */}
+  <YourChatBox />    {/* any UI built on useVeneerGenerate(); the SDK ships no chat widget */}
 </VeneerProvider>
 ```
 
@@ -138,6 +152,11 @@ Install is one command: `npm install @veneer/react @veneer/server`. Those are th
 packages: the client (MIT, browser) and the endpoint (commercial, server). Both ship compiled
 JavaScript plus TypeScript declarations, so no bundler configuration is needed. The shared internals
 live in the private `packages/core` workspace and are bundled into each at build time.
+
+One static file to serve: copy `node_modules/@veneer/react/dist/veneer-worker.js` to your public
+directory (the demo does it in a `prebuild` script), or pass `workerUrl` to `VeneerCanvas`. If your
+page has a Content-Security-Policy, add `'wasm-unsafe-eval'` to `script-src` and `'self'` to
+`worker-src`.
 
 The registry's plain-English descriptions are handed to the model so it knows what it can do; the
 registry's ids are what the bridge enforces at runtime. Generated code reads data via
@@ -156,7 +175,7 @@ You'll need **Node 20+** (`.nvmrc` pins 24) and a **Google Gemini API key** ([ge
 npm install
 npm test                       # unit tests for all packages
 npm run typecheck              # the hand-written .d.ts files against a TypeScript smoke file
-npm run test:e2e               # browser tests in Chromium (sandbox, bridge, CSP, navigation detection)
+npm run test:e2e               # browser tests in Chromium (engine, allowlist, bridge, CSP, watchdog; legacy frame)
 
 # 2. Configure the demo
 cd examples/demo
@@ -182,8 +201,8 @@ Click **“Talk with AI to change the look of this page”** (bottom-right) and 
   grouping by `dueDate` (not from a fixed list).
 - **“Add a delete button on each task.”** → politely refused — no `deleteTask` is registered, so
   the server's scan returns `code: null` with an explanation and the prior UI stays. Had the code
-  reached the frame anyway, the in-frame scan refuses to run it, the CSP gives it no network, and
-  the bridge rejects the call.
+  reached the client anyway, the scan refuses to run it, the interpreter refuses the unregistered
+  id, and the bridge rejects the call.
 
 ---
 

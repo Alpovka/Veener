@@ -96,7 +96,38 @@ export interface VeneerFrameProps {
   maxHeight?: number;
 }
 
+/** Legacy iframe engine. Kept one release; prefer `VeneerCanvas`. */
 export function VeneerFrame(props: VeneerFrameProps): ReactElement | null;
+
+/** Default URL the canvas loads the engine worker from (serve `dist/veneer-worker.js` there). */
+export const DEFAULT_WORKER_URL: string;
+
+export interface VeneerCanvasProps {
+  className?: string;
+  style?: CSSProperties;
+  /** Same-origin URL of `dist/veneer-worker.js`. Default '/veneer-worker.js'. */
+  workerUrl?: string;
+  onError?: (err: FrameError) => void;
+  /** console output from generated code (level, text). */
+  onLog?: (level: string, text: string) => void;
+  onSecurityViolation?: (info: { reason: ViolationReason; detail?: unknown; code?: string; protocol: number; engine: 'worker' }) => void;
+  actionTimeoutMs?: number;
+  heartbeatMs?: number;
+  maxMissedHeartbeats?: number;
+  readyTimeoutMs?: number;
+  validation?: 'on' | 'off';
+  rateLimit?: { ratePerSec?: number; burst?: number };
+  /** Reserved height before the first render, so the page does not jump. Default 120. */
+  minHeight?: number;
+  /** How far (px) generated UI may hang below the canvas before it is clipped. Default 280. */
+  bleed?: number;
+}
+
+/**
+ * The worker engine: generated code runs in a QuickJS interpreter inside a Web Worker and only
+ * describes what to draw; your React draws it in your DOM through an allowlist. No iframe.
+ */
+export function VeneerCanvas(props: VeneerCanvasProps): ReactElement | null;
 
 export type Intent = 'design' | 'chat' | 'clarify';
 

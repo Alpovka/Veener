@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { VeneerProvider, VeneerFrame } from '@veneer/react';
+import { VeneerProvider, VeneerCanvas } from '@veneer/react';
 import { VeneerChat } from './_components/VeneerChat';
 import { VeneerLogo } from './_components/VeneerLogo';
 import { registry, initialTasks, defaultUI, theme as brandTheme } from './veneer.config';
@@ -499,7 +499,7 @@ function HowItWorks() {
     {
       number: '03',
       title: 'AI builds it, safely',
-      body: 'Every generated element is loaded inside a read-only iframe sandbox. The model can style anything, but can only invoke the native functions you exposed.',
+      body: 'Generated code runs in a sandboxed interpreter that can only describe what to draw. The model can style anything, but can only invoke the native functions you exposed.',
       style: {
         transform: `translateY(${card3Y}px)`,
         zIndex: 30,
@@ -595,7 +595,8 @@ function HowItWorks() {
 function LiveDemo({ reload }) {
   const [tab, setTab] = useState('preview');
   // Cap the canvas to the viewport so the demo card is fully visible instead of running off the
-  // bottom of the screen. Leaves room for the browser-frame chrome and the section's padding.
+  // bottom of the screen; taller views scroll inside the card. Leaves room for the browser-frame
+  // chrome and the section's padding.
   const [maxCanvas, setMaxCanvas] = useState(720);
   useEffect(() => {
     const calc = () => setMaxCanvas(Math.max(440, Math.min(900, Math.round(window.innerHeight - 240))));
@@ -665,13 +666,16 @@ function LiveDemo({ reload }) {
                   <span className="font-mono text-xs text-slate-400">veneer.config.js · page.jsx</span>
                 )}
               </div>
-              {/* Keep the iframe mounted across tab switches so demo state persists. */}
-              <div className={tab === 'preview' ? '' : 'hidden'}>
-                <VeneerFrame
-                  frameSrc="/veneer-frame"
-                  autoHeight
+              {/* Keep the canvas mounted across tab switches so demo state persists. The generated
+                  UI is real DOM in this page (no iframe); the wrapper scrolls when a view is taller
+                  than the viewport cap. */}
+              <div
+                className={`${tab === 'preview' ? '' : 'hidden'} overscroll-contain`}
+                style={{ maxHeight: maxCanvas, overflowY: 'auto' }}
+                data-lenis-prevent
+              >
+                <VeneerCanvas
                   minHeight={Math.min(560, maxCanvas)}
-                  maxHeight={maxCanvas}
                   onError={(e) => console.warn('[veneer]', e)}
                 />
               </div>
@@ -747,11 +751,11 @@ function DemoCode() {
         {'\n'}
         {pl('};')}
         {'\n\n'}
-        <span>{com('// 3) Drop in three components. The frame is the sandbox; the chat redesigns it.')}</span>
+        <span>{com('// 3) Drop in two components. The canvas is the sandbox; your chat redesigns it.')}</span>
         {'\n'}
         {pl('<')}{fn('VeneerProvider')} {prop('registry')}{pl('={registry} ')}{prop('actions')}{pl('={actions} ')}{prop('data')}{pl('={{ tasks }}>')}
         {'\n'}
-        {'  '}{pl('<')}{fn('VeneerFrame')} {prop('style')}{pl('={{ ')}{prop('height')}{pl(': ')}{num('560')}{pl(' }} />')}
+        {'  '}{pl('<')}{fn('VeneerCanvas')} {prop('minHeight')}{pl('={')}{num('560')}{pl('} />')}
         {'\n'}
         {'  '}{pl('<')}{fn('YourChatBox')} {pl('/>  ')}{com('// built on useVeneerGenerate()')}
         {'\n'}
@@ -790,7 +794,7 @@ function Features() {
                 <span className="absolute inset-0 animate-pulse-ring rounded-2xl border border-brand-400/50" />
               </div>
             </div>
-            <BentoText title="Hard security sandbox" body="Opaque origin, no network, validated bridge — three independent layers." />
+            <BentoText title="Hard security sandbox" body="An interpreter with no browser in it, an allowlisted renderer, a validated bridge — three independent layers." />
           </BentoCard>
         </Reveal>
 
@@ -823,7 +827,7 @@ function Features() {
                 <span className="text-slate-400 dark:text-slate-500">$</span> npm i @veneer/react @veneer/server
               </div>
             </div>
-            <BentoText title="Open-source React package" body="A provider, a frame, a chat. Three components and you're live. (Note: Package naming is a placeholder subject to change on release.)" />
+            <BentoText title="Open-source React package" body="A provider, a canvas, a hook. Drop them in and you're live. (Note: Package naming is a placeholder subject to change on release.)" />
           </BentoCard>
         </Reveal>
 
@@ -994,21 +998,21 @@ function Security() {
   const layers = [
     {
       n: '1',
-      title: 'Opaque origin',
-      code: 'sandbox="allow-scripts allow-forms"',
-      body: 'No allow-same-origin, so the frame runs at an opaque origin: zero access to the parent’s cookies, localStorage, or DOM, and no popups, downloads or top-level navigation.',
+      title: 'An interpreter, not a browser',
+      code: 'QuickJS (WebAssembly) · Web Worker',
+      body: 'Generated code runs in a JavaScript interpreter inside a Web Worker. There is no window, document, fetch, location or cookie in there — not blocked, simply nonexistent. All it can do is describe what to draw.',
     },
     {
       n: '2',
-      title: 'No network',
-      code: "connect-src 'none'",
-      body: 'A strict CSP means generated code cannot fetch, XHR, open a WebSocket, send a beacon, or load anything but four pinned, hash-verified runtime scripts.',
+      title: 'Allowlisted rendering',
+      code: 'ops → allowlist → your DOM',
+      body: 'Your page redraws that description with its own React. Only safe elements, attributes and styles pass; links, images, scripts, url() and anything that could escape the canvas are dropped. Tailwind is compiled per view and scoped to the canvas.',
     },
     {
       n: '3',
       title: 'Validated bridge',
-      code: 'MessageChannel → registry.actions[id]',
-      body: 'The frame talks to your app over a private port. Every action is checked against the registry — id, declared args, types, rate — before the real implementation runs. Only declared return values and registered data cross back.',
+      code: 'veneer.action(id) → registry.actions[id]',
+      body: 'Every action is checked against the registry — id, declared args, types, rate — before the real implementation runs. Only declared return values and registered data cross back into the interpreter.',
     },
   ];
 
@@ -1032,8 +1036,9 @@ function Security() {
           </h2>
           <p className="mt-4 text-slate-600 dark:text-slate-300">
             The model can write anything. It still can’t do anything you didn’t allow.
-            Three independent layers enforce the same contract, plus a static scan before any code runs
-            and a watchdog that resets the canvas if a generation ever steps out of line.
+            Three independent layers enforce the same contract, plus a static scan before any code runs,
+            a CPU deadline on every entry, and a watchdog that terminates the worker and resets the canvas
+            if a generation ever hangs.
           </p>
         </Reveal>
 
@@ -1069,7 +1074,7 @@ function Security() {
             </div>
             <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300 sm:ml-auto sm:max-w-md">
               No <span className="font-mono">deleteTask</span> is registered, so the scanner refuses the
-              code before it runs, the CSP leaves it no network to reach your API, and the bridge
+              code before it runs, the interpreter has no network to reach your API, and the bridge
               rejects the call. Deletion fails on every layer.
             </p>
           </div>
@@ -1152,7 +1157,7 @@ function Developer() {
               {'\n'}
               {'  '}{prop('data')}{pl('={{ tasks }}>')}
               {'\n'}
-              {'  '}{pl('<')}{fn('VeneerFrame')} {prop('style')}{pl('={{ ')}{prop('height')}{pl(': ')}{num('620')}{pl(' }} />')}
+              {'  '}{pl('<')}{fn('VeneerCanvas')} {prop('minHeight')}{pl('={')}{num('620')}{pl('} />')}
               {'\n'}
               {'  '}{pl('<')}{fn('YourChatBox')} {pl('/>  ')}{com('// built on useVeneerGenerate()')}
               {'\n'}
@@ -1231,7 +1236,7 @@ function Faq() {
   const qs = [
     [
       'Is the generated code actually safe to run?',
-      'That’s the core of the product. Generated UI runs in an opaque-origin iframe with no same-origin access, a CSP that blocks fetch/XHR/WebSockets and every external resource, and a private-channel bridge that only runs actions you registered with the args you declared. Code is statically scanned before it runs, and if a generation ever navigates the frame or hangs, the canvas is reset and your app is notified. The one thing no browser can prevent is a frame navigating itself, so only push data you would show that user anyway — the SDK docs spell out every residual.',
+      'That’s the core of the product. Generated code runs in a JavaScript interpreter (QuickJS compiled to WebAssembly) inside a Web Worker, where window, document, fetch, location and cookies simply do not exist. It can only describe what to draw; your page redraws that through an allowlist that drops links, images, scripts and url() styles, and a bridge that only runs actions you registered with the args you declared. Code is statically scanned before it runs, every entry has a CPU deadline, and if a generation ever hangs the worker is terminated, the canvas is reset and your app is notified. Only push data you would show that user on screen anyway — the SDK docs spell out every residual.',
     ],
     [
       'Do I have to ship my source code?',

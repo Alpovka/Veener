@@ -12,7 +12,7 @@ import Lenis from 'lenis';
  *  - Disabled when the user prefers reduced motion (falls back to native scroll).
  *  - In-page anchor links are routed through lenis.scrollTo with an offset for the fixed nav.
  *  - Scrollable inner regions (e.g. the chat panel) opt out with [data-lenis-prevent].
- *  - The sandbox iframe keeps its own pointer/wheel events, so it stays interactive.
+ *  - The live demo's canvas wrapper opts out too, so a tall generated view scrolls inside the card.
  */
 export default function SmoothScroll() {
   useEffect(() => {

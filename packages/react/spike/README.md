@@ -1,5 +1,8 @@
 # M0 spike — interpreter-in-worker engine (go/no-go)
 
+> Status: **shipped.** The engine lives in `packages/react/src/engine/` (`VeneerCanvas`); these files
+> are the original throwaway measurements and are kept for the numbers below.
+
 Run: `node spike/quickjs-spike.mjs` and `node spike/tailwind-spike.mjs` (after `npm install`).
 Guest bundle: `npx esbuild spike/guest.js --bundle --format=iife --target=es2020 --minify --outfile=spike/guest.bundle.js`.
 

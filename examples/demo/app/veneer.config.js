@@ -46,7 +46,7 @@ export const registry = {
 
 // The demo brand, handed to <VeneerProvider theme>. Generated UIs and the chat widget use these
 // tokens (bg-primary, text-foreground, rounded-md, …) instead of hardcoded colours, and follow
-// the site's light/dark toggle. Inter ships from /public/fonts and is inlined into the sandbox.
+// the site's light/dark toggle. Generated UI renders in this page, so the page's own Inter applies.
 export const theme = {
   colors: {
     primary: '#4f46e5',
@@ -79,7 +79,7 @@ export const initialTasks = [
   { id: 't6', title: 'Record product demo', status: 'doing', dueDate: '2026-06-20' },
 ];
 
-// The default view, rendered inside the same sandbox as any generated UI.
+// The default view, run through the same interpreter and allowlist as any generated UI.
 // "Reset to default" reverts to this. It demonstrates the full bridge working out of the box.
 export const defaultUI = `function VeneerUI() {
   const tasks = veneer.data('tasks') || [];

@@ -28,7 +28,7 @@ export const metadata = {
     'AI UI generation',
     'open-source React package',
     'MCP',
-    'sandboxed iframe',
+    'sandboxed interpreter',
     'generative UI',
     'open-source npm package',
   ],

@@ -33,7 +33,7 @@ const NAV = [
 
 const COMPONENTS = [
   ['VeneerProvider', 'Holds the registry, the real action implementations, and live data. Persists the current UI (localStorage / sessionStorage / memory via the persist prop).'],
-  ['VeneerFrame', 'Renders the sandboxed iframe, injects generated code + the in-frame runtime, and runs the parent-side bridge.'],
+  ['VeneerCanvas', 'The engine. Runs generated code in a QuickJS interpreter inside a Web Worker, redraws what it renders in your page through an allowlist, compiles the Tailwind it uses, and runs the bridge and the watchdog. Serve dist/veneer-worker.js from your origin.'],
   ['useVeneerGenerate()', 'Headless hook for your own chat box or command palette: generate(message), busy, history, reply, undo, reset, violation. The SDK ships no chat UI; the demo’s floating chat is a 300-line example built on this hook.'],
   ['useVeneer()', 'Access { registry, actions, data, ui, setUi, reset } inside the provider.'],
 ];
@@ -192,7 +192,7 @@ export default function DocsPage() {
                     {'\n\n'}
                     {pl('<')}{fn('VeneerProvider')} {prop('registry')}{pl('={registry} ')}{prop('actions')}{pl('={actions} ')}{prop('data')}{pl('={{ tasks }}>')}
                     {'\n'}
-                    {'  '}{pl('<')}{fn('VeneerFrame')} {prop('style')}{pl('={{ ')}{prop('height')}{pl(': ')}{num('620')}{pl(' }} />')}
+                    {'  '}{pl('<')}{fn('VeneerCanvas')} {prop('minHeight')}{pl('={')}{num('620')}{pl('} />')}
                     {'\n'}
                     {'  '}{pl('<')}{fn('YourChatBox')} {pl('/>  ')}{com('// useVeneerGenerate()')}
                     {'\n'}
@@ -215,7 +215,7 @@ export default function DocsPage() {
                 {[
                   ['You set the rules', 'List the data and actions your app allows, and plug in the real functions. That list is the only thing the AI can use.'],
                   ['Users describe it', 'They open the chat and say how they want the page to look. The model writes a self-contained component.'],
-                  ['It runs safely', 'The component renders in a sandboxed iframe whose only channel is a validated bridge to your registered actions.'],
+                  ['It runs safely', 'The component runs in a sandboxed interpreter that can only describe what to draw; your page redraws it through an allowlist, and its only channel out is a validated bridge to your registered actions.'],
                 ].map(([t, b], i) => (
                   <li key={t} className="flex gap-3">
                     <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-violet-600 text-xs font-bold text-white">
@@ -263,8 +263,8 @@ export default function DocsPage() {
                 ))}
               </ul>
               <P>
-                <Ic>fetch</Ic>, cookies, storage, and any external resource do not work inside the
-                sandbox — all I/O goes through a private <Ic>MessageChannel</Ic> to the bridge. The server
+                <Ic>fetch</Ic>, <Ic>window</Ic>, <Ic>document</Ic>, cookies, storage and external resources
+                do not exist inside the interpreter — all I/O goes through the bridge. The server
                 endpoint (<Ic>createVeneerHandler</Ic> from <Ic>@veneer/server</Ic>) owns the registry,
                 caps and rate-limits requests, and scans generated code before returning it.
               </P>
@@ -290,14 +290,15 @@ export default function DocsPage() {
                 Pass a <Ic>theme</Ic> to <Ic>VeneerProvider</Ic> and the generated UI takes your brand
                 (your own chat UI can read the same tokens from <Ic>useVeneer()</Ic>): colours (per
                 light/dark mode), radii, fonts and shadows become{' '}
-                <Ic>--veneer-*</Ic> variables inside the sandbox, and Tailwind utilities such as{' '}
+                <Ic>--veneer-*</Ic> variables on the canvas, and Tailwind utilities such as{' '}
                 <Ic>bg-primary</Ic>, <Ic>text-foreground</Ic>, <Ic>border-border</Ic> and{' '}
                 <Ic>rounded-md</Ic> resolve to them. The model is told to use exactly that vocabulary.
               </P>
               <P>
-                Fonts are fetched by your page and inlined into the frame as data URIs, so the sandbox
-                CSP does not change. With <Ic>autoHeight</Ic> the canvas sizes itself to its content and
-                flows with the page. Pass <Ic>mode: 'system'</Ic> to follow the OS, or{' '}
+                Generated UI is real DOM in your page, so your fonts, focus order and overlays apply as they
+                are; Tailwind is compiled per view and scoped to the canvas, so neither side can restyle the
+                other. The canvas sizes itself to its content and flows with the page. Pass{' '}
+                <Ic>mode: 'system'</Ic> to follow the OS, or{' '}
                 <Ic>'light'</Ic> / <Ic>'dark'</Ic> to follow your own toggle — this page does the latter.
               </P>
             </section>
@@ -306,11 +307,11 @@ export default function DocsPage() {
               <P>Three independent layers, none of which depend on the model behaving, plus a static scan and a watchdog:</P>
               <ul className="mt-4 space-y-3">
                 {[
-                  ['Opaque origin', 'sandbox="allow-scripts allow-forms" with no allow-same-origin — no access to the parent’s cookies, DOM, or storage; no popups, downloads or top-level navigation.'],
-                  ['No network', "A strict CSP sets connect-src 'none' and pins the four runtime scripts by exact URL (with SRI), so generated code can’t fetch, XHR, open a WebSocket, send a beacon, or import anything."],
-                  ['Validated bridge', 'A private MessageChannel. Every action is validated — registered id, declared args and types, rate limit — before the real implementation runs; only declared return values and registered data cross back.'],
-                  ['Scan + watchdog', 'Generated code is parsed and refused if it reaches for window, document, location, network globals, this, imports or unregistered ids. If a frame navigates itself or hangs, the canvas is reset and onSecurityViolation fires.'],
-                  ['Known limit', 'A sandboxed frame can always navigate itself, and no browser lets a host prevent that — Veneer detects it and shuts the frame down, but data already inside the frame could leave in that first URL. Serve the frame from a URL (frameSrc) if your page has a strict CSP; see the SDK README for every residual.'],
+                  ['An interpreter, not a browser', 'Generated code runs in QuickJS (compiled to WebAssembly) inside a Web Worker. window, document, fetch, location, cookies and storage do not exist there; only JSON crosses the boundary, and every entry has a CPU deadline and a memory cap.'],
+                  ['Allowlisted rendering', 'The interpreter only describes what to draw. Your page redraws it with its own React through an allowlist: no links, images, scripts, iframes, url() styles, fixed positioning or ids that collide with yours. Tailwind is compiled for exactly the classes used and scoped to the canvas.'],
+                  ['Validated bridge', 'Every action is validated — registered id, declared args and types, rate limit — before the real implementation runs; only declared return values and registered data cross back.'],
+                  ['Scan + watchdog', 'Generated code is parsed and refused if it reaches for window, document, location, network globals, this, imports or unregistered ids. If the interpreter hangs or stops answering heartbeats, the worker is terminated, the canvas is reset and onSecurityViolation fires.'],
+                  ['Host requirements', "Serve @veneer/react's dist/veneer-worker.js from your origin (default path /veneer-worker.js). If your page sets a Content-Security-Policy, allow 'wasm-unsafe-eval' in script-src and 'self' in worker-src; nothing else changes."],
                 ].map(([t, b]) => (
                   <li key={t} className="flex gap-3">
                     <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">

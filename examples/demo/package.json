@@ -6,7 +6,9 @@
     "node": "24.x"
   },
   "scripts": {
+    "predev": "node scripts/copy-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-worker.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "echo \"lint: configure eslint if needed\""

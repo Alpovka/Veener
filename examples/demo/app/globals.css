@@ -17,8 +17,8 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Lenis smooth-scroll (omitting the default `iframe { pointer-events:none }`
-   rule so the live sandbox iframe stays fully interactive). */
+/* Lenis smooth-scroll (omitting its default `iframe { pointer-events:none }` rule; the site has no
+   iframes, generated UI is real DOM in the page). */
 html.lenis,
 html.lenis body {
   height: auto;

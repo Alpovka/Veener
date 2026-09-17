@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 /* Small, dependency-free visual building blocks used across the landing page.
    Everything here is presentational — the real, running open-source package lives in the
-   "Live demo" section of page.js (VeneerFrame + VeneerChat). */
+   "Live demo" section of page.js (VeneerCanvas + VeneerChat). */
 
 /* ---------- window chrome ---------- */
 function Dots() {

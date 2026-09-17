@@ -10,3 +10,6 @@ dist
 coverage
 *.tgz
 packages/react/spike/guest.bundle.js
+
+# built by examples/demo/scripts/copy-worker.mjs before dev/build
+examples/demo/public/veneer-worker.js
