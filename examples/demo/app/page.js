@@ -39,7 +39,7 @@ import {
 // Persona-driven prompts: the same task app, personalized for very different people.
 const DEMO_PROMPTS = [
   'I manage the team — show a dashboard with progress and anything overdue',
-  'I just want a simple checklist of what’s due today',
+  'Show a calendar by due date and flag anything overdue',
   'Make it a kanban board I can drag tasks across',
 ];
 
@@ -69,7 +69,9 @@ export default function Home() {
   );
 
   const data = useMemo(() => ({ tasks }), [tasks]);
-  const reload = useCallback(() => setTasks(initialTasks), []);
+  // Fresh copies on every reset: a new array and new objects guarantee the canvas receives a data
+  // push and returns to the pristine sample, regardless of what the current view did to the tasks.
+  const reload = useCallback(() => setTasks(initialTasks.map((t) => ({ ...t }))), []);
   // The canvas and the chat widget follow the site's light/dark toggle.
   const { theme: siteMode } = useTheme();
   const veneerTheme = useMemo(() => ({ ...brandTheme, mode: siteMode === 'dark' ? 'dark' : 'light' }), [siteMode]);
@@ -592,6 +594,15 @@ function HowItWorks() {
 /* ============================ LIVE DEMO ============================ */
 function LiveDemo({ reload }) {
   const [tab, setTab] = useState('preview');
+  // Cap the canvas to the viewport so the demo card is fully visible instead of running off the
+  // bottom of the screen. Leaves room for the browser-frame chrome and the section's padding.
+  const [maxCanvas, setMaxCanvas] = useState(720);
+  useEffect(() => {
+    const calc = () => setMaxCanvas(Math.max(440, Math.min(900, Math.round(window.innerHeight - 240))));
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
 
   return (
     <section
@@ -659,8 +670,8 @@ function LiveDemo({ reload }) {
                 <VeneerFrame
                   frameSrc="/veneer-frame"
                   autoHeight
-                  minHeight={560}
-                  maxHeight={900}
+                  minHeight={Math.min(560, maxCanvas)}
+                  maxHeight={maxCanvas}
                   onError={(e) => console.warn('[veneer]', e)}
                 />
               </div>
