@@ -15,7 +15,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node build.mjs",
     "prepare": "node build.mjs",
@@ -24,12 +28,29 @@
     "test:watch": "vitest",
     "test:e2e": "node e2e/run.mjs"
   },
-  "keywords": ["react", "ai", "personalization", "sandbox", "ui-generation", "generative-ui"],
-  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/react" },
+  "keywords": [
+    "react",
+    "ai",
+    "personalization",
+    "sandbox",
+    "ui-generation",
+    "generative-ui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alpovka/Alter.git",
+    "directory": "packages/react"
+  },
   "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/react#readme",
-  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
-  "engines": { "node": ">=20" },
-  "publishConfig": { "access": "public" },
+  "bugs": {
+    "url": "https://github.com/Alpovka/Alter/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18"
@@ -37,13 +58,19 @@
   "devDependencies": {
     "@babel/standalone": "7.29.8",
     "@fontsource/inter": "^5.3.0",
+    "@jitl/quickjs-singlefile-browser-release-sync": "^0.32.0",
+    "@jitl/quickjs-wasmfile-release-sync": "^0.32.0",
     "@playwright/test": "^1.63.0",
     "@veneer/core": "0.3.0",
     "@veneer/server": "0.3.0",
     "esbuild": "^0.28.2",
     "jsdom": "^27.0.0",
+    "preact": "^10.29.8",
+    "quickjs-emscripten-core": "^0.32.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "sucrase": "^3.35.1",
+    "tailwindcss": "^4.3.3",
     "vitest": "^5.0.0"
   }
 }

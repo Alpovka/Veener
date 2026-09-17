@@ -60,6 +60,9 @@ permanent. Both scopes were free on 2026-09-17; the unscoped name `veneer` is ta
   accepted without a token). `NEXT_PUBLIC_SITE_URL` for canonical metadata. `RESEND_API_KEY` and
   the optional waitlist variables.
 - Node 24 (`.nvmrc`; the demo's `engines.node` tells Vercel the same). The API route declares `maxDuration = 60`; the model call times out at 45 s.
+- The engine worker: `npm run build` in the demo first copies `@veneer/react/dist/veneer-worker.js`
+  to `public/` (`scripts/copy-worker.mjs`, ignored by git). The site CSP allows
+  `'wasm-unsafe-eval'` and `worker-src 'self'` for it; nothing else about the policy is engine-specific.
 
 ## 5. Before the first customer
 

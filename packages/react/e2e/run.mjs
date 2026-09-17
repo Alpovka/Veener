@@ -6,6 +6,7 @@
  */
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 // Resolve a file inside an installed package without going through its `exports` map
@@ -37,6 +38,24 @@ const bundle = await build({
 });
 const hostJs = bundle.outputFiles[0].text;
 
+// The worker engine: the host bundle comes from src, the worker from dist (it is a build product:
+// guest bundle text + QuickJS wasm + the Tailwind compiler). Build it if it is not there yet.
+const workerFile = resolve(root, 'dist/veneer-worker.js');
+if (!existsSync(workerFile)) execFileSync(process.execPath, [resolve(root, 'build.mjs')], { stdio: 'inherit' });
+const workerJs = readFileSync(workerFile, 'utf8');
+const canvasBundle = await build({
+  entryPoints: [resolve(here, 'harness/canvas.jsx')],
+  bundle: true,
+  write: false,
+  format: 'iife',
+  loader: { '.js': 'jsx', '.jsx': 'jsx' },
+  define: { 'process.env.NODE_ENV': '"development"' },
+  logLevel: 'error',
+});
+const canvasJs = canvasBundle.outputFiles[0].text;
+// No 'unsafe-inline' anywhere and no 'unsafe-eval': only wasm compilation, in a same-origin worker.
+const CANVAS_STRICT_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; connect-src 'none'; img-src 'none'; font-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+
 const steals = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -50,6 +69,18 @@ const server = http.createServer(async (req, res) => {
   } else if (url.pathname === '/host.js') {
     res.writeHead(200, { 'content-type': 'text/javascript' });
     res.end(hostJs);
+  } else if (url.pathname === '/canvas') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<!doctype html><title>canvas host</title><div id="app"></div><script src="/canvas.js"></script>');
+  } else if (url.pathname === '/canvas-strict') {
+    res.writeHead(200, { 'content-type': 'text/html', 'content-security-policy': CANVAS_STRICT_CSP });
+    res.end('<!doctype html><title>canvas host</title><div id="app"></div><script src="/canvas.js"></script>');
+  } else if (url.pathname === '/canvas.js') {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    res.end(canvasJs);
+  } else if (url.pathname === '/veneer-worker.js') {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    res.end(workerJs);
   } else if (url.pathname === '/veneer-frame') {
     const r = buildFrameResponse({ frameAncestors: "'self'" });
     res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -110,7 +141,10 @@ const veneerFrame = (page) => page.frames().find((f) => f.parentFrame() === page
 const waitState = (page, pred, timeout = 8000) => page.waitForFunction(pred, null, { timeout });
 const events = (page) => page.evaluate(() => window.__events);
 
-for (const mode of ['srcdoc', 'url']) {
+// E2E_ONLY=canvas | frame narrows the run while iterating; CI runs everything.
+const ONLY = process.env.E2E_ONLY || '';
+
+if (ONLY !== 'canvas') for (const mode of ['srcdoc', 'url']) {
   const { context, page } = await newPage();
   await page.goto(`${base}/?mode=${mode}`);
   const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
@@ -161,7 +195,7 @@ for (const mode of ['srcdoc', 'url']) {
 }
 
 // Branding: theme tokens, dark mode, inlined font and auto-height.
-for (const dark of ['0', '1']) {
+if (ONLY !== 'canvas') for (const dark of ['0', '1']) {
   const { context, page } = await newPage();
   await page.goto(`${base}/?mode=url&dark=${dark}&autoheight=1`);
   const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
@@ -214,7 +248,7 @@ for (const dark of ['0', '1']) {
 }
 
 // Navigation exfil, simulating a scanner bypass by running the navigation from inside the frame.
-{
+if (ONLY !== 'canvas') {
   const { context, page } = await newPage();
   await page.goto(`${base}/?mode=url`);
   const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
@@ -247,7 +281,7 @@ for (const dark of ['0', '1']) {
 }
 
 // Never-completing navigation: no load event → heartbeat must catch it.
-{
+if (ONLY !== 'canvas') {
   const { context, page } = await newPage();
   await page.goto(`${base}/?mode=url`);
   const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
@@ -265,7 +299,7 @@ for (const dark of ['0', '1']) {
 }
 
 // Tampered CDN bytes must fail SRI: the runtime never starts, the host reports a timeout.
-{
+if (ONLY !== 'canvas') {
   const { context, page } = await newPage({ breakSri: true });
   await page.goto(`${base}/?mode=url`);
   try {
@@ -279,7 +313,7 @@ for (const dark of ['0', '1']) {
 }
 
 // Host CSP inheritance: srcdoc breaks under a strict host CSP, frameSrc works.
-{
+if (ONLY !== 'canvas') {
   const { context, page } = await newPage();
   await page.goto(`${base}/strict-csp?mode=url`);
   const frameLoc = page.frameLocator('iframe[title="Veneer canvas"]');
@@ -299,6 +333,163 @@ for (const dark of ['0', '1']) {
     check('srcdoc mode under a strict host CSP reports a clear runtime-timeout diagnostic', false, e.message.split('\n')[0]);
   }
   await c2.close();
+}
+
+// ============================================================================================
+// Worker engine (VeneerCanvas): generated UI lands in the host document through the allowlist.
+// Generated ids are namespaced (`#count` → `#v-count`), classes are prefixed (`grid` → `v:grid`).
+// ============================================================================================
+const canvasEvents = (page) => page.evaluate(() => window.__events);
+const canvasOf = (page) => page.locator('[data-veneer-engine="worker"]');
+const noSteal = (page) => page.evaluate(() => location.pathname);
+
+if (ONLY !== 'frame') for (const variant of ['/canvas', '/canvas-strict']) {
+  const strict = variant === '/canvas-strict';
+  const tag = strict ? '[canvas strict-csp]' : '[canvas]';
+  const { context, page } = await newPage();
+  const cspViolations = [];
+  page.on('console', (m) => {
+    if (/Content Security Policy/i.test(m.text())) cspViolations.push(m.text());
+  });
+  await page.goto(`${base}${variant}`);
+  try {
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    check(`${tag} default UI renders natively (no iframe)`, (await page.locator('#v-count').textContent()) === '1' && (await page.locator('iframe').count()) === 0);
+    check(`${tag} generated nodes live inside the canvas root`, (await canvasOf(page).locator('#v-count').count()) === 1);
+
+    // Styling: prefixed utilities compiled in the worker, brand tokens from the provider theme.
+    const brand = await page.evaluate(() => {
+      const el = document.getElementById('v-brand');
+      const cs = getComputedStyle(el);
+      const h1 = getComputedStyle(document.getElementById('host-h1'));
+      const root = document.querySelector('[data-veneer-engine="worker"]');
+      return {
+        cls: el.className,
+        bg: cs.backgroundColor,
+        color: cs.color,
+        radius: cs.borderTopLeftRadius,
+        h1Size: h1.fontSize,
+        h1Margin: h1.marginTop,
+        primaryVar: getComputedStyle(root).getPropertyValue('--veneer-primary').trim(),
+        bgVar: getComputedStyle(root).getPropertyValue('--veneer-background').trim(),
+        font: getComputedStyle(document.getElementById('v-count')).fontFamily,
+        sheets: document.adoptedStyleSheets ? document.adoptedStyleSheets.length : -1,
+        countSize: getComputedStyle(document.getElementById('v-count')).fontSize,
+      };
+    });
+    check(`${tag} class names are prefixed`, /(^|\s)v:bg-primary(\s|$)/.test(brand.cls) && !/(^|\s)bg-primary(\s|$)/.test(brand.cls), brand.cls);
+    check(`${tag} bg-primary resolves to the brand colour`, brand.bg === 'rgb(15, 118, 110)', brand.bg);
+    check(`${tag} text-primary-foreground resolves`, brand.color === 'rgb(255, 255, 255)', brand.color);
+    check(`${tag} rounded-md is the brand radius`, brand.radius === '2px', brand.radius);
+    check(`${tag} text-2xl utility applies`, brand.countSize === '24px', brand.countSize);
+    check(`${tag} brand font reaches generated nodes`, /Georgia/.test(brand.font), brand.font);
+    check(`${tag} theme variables are set on the canvas root`, brand.primaryVar === '#0f766e' && brand.bgVar === '#fffdf7', JSON.stringify([brand.primaryVar, brand.bgVar]));
+    check(`${tag} preflight does not leak onto the host page`, brand.h1Size === '32px' && brand.h1Margin !== '0px', JSON.stringify([brand.h1Size, brand.h1Margin]));
+    check(`${tag} stylesheet is installed via adoptedStyleSheets`, brand.sheets >= 1, String(brand.sheets));
+
+    // Bridge: actions, validation, data push.
+    await page.locator('#v-add').click();
+    await page.locator('#v-count').filter({ hasText: '2' }).waitFor({ timeout: 5000 });
+    check(`${tag} action round-trip + data push re-renders`, true);
+    check(`${tag} declared return value crosses the bridge`, /^t[a-z0-9]+$/.test((await page.locator('#v-last').textContent()) || ''));
+    check(`${tag} list re-renders from pushed data`, (await page.locator('.v\\:task').count()) === 2);
+    await page.locator('#v-bad').click();
+    await page.locator('#v-last').filter({ hasText: 'rejected' }).waitFor({ timeout: 5000 });
+    check(`${tag} invalid args are rejected by the bridge`, /must be string/.test(await page.locator('#v-last').textContent()));
+    await page.locator('#v-del').click();
+    await page.locator('#v-last').filter({ hasText: 'not registered' }).waitFor({ timeout: 5000 });
+    check(`${tag} unregistered action is refused inside the box and never reaches the host impl`, !(await page.evaluate(() => window.__deleted)));
+    await page.locator('#v-globals').click();
+    await page.locator('#v-last').filter({ hasText: 'undefined' }).waitFor({ timeout: 5000 });
+    const globals = await page.locator('#v-last').textContent();
+    check(`${tag} fetch/location/window/document/XHR/WebAssembly/importScripts do not exist in the box`, globals === 'undefined,undefined,undefined,undefined,undefined,undefined,undefined', globals);
+
+    // Typing: DOM owns the text, the box sees the value.
+    await page.locator('#v-title').fill('hello');
+    await page.locator('#v-echo').filter({ hasText: 'hello' }).waitFor({ timeout: 5000 });
+    check(`${tag} typing reaches the box and the input keeps its text`, (await page.locator('#v-title').inputValue()) === 'hello');
+
+    // Wall 2: the allowlist.
+    steals.length = 0;
+    await page.locator('#v-submit').click();
+    await page.locator('#v-last').filter({ hasText: 'submitted' }).waitFor({ timeout: 5000 });
+    check(`${tag} form onSubmit fires and does not navigate`, (await noSteal(page)) === variant);
+    const link = await page.evaluate(() => {
+      const el = document.getElementById('v-link');
+      return el ? { tag: el.tagName, href: el.getAttribute('href'), text: el.textContent } : null;
+    });
+    check(`${tag} <a> is demoted to a span without href`, link && link.tag === 'SPAN' && link.href === null && link.text === 'link text', JSON.stringify(link));
+    await page.locator('#v-link').click();
+    await page.waitForTimeout(300);
+    check(`${tag} clicking the demoted link goes nowhere`, (await noSteal(page)) === variant && steals.length === 0);
+    check(`${tag} <img> is dropped`, (await page.locator('#v-img').count()) === 0 && (await canvasOf(page).locator('img').count()) === 0);
+    const sty = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById('v-sty'));
+      return { bgImage: cs.backgroundImage, position: cs.position, z: cs.zIndex, color: cs.color };
+    });
+    check(`${tag} inline style: url() dropped, fixed demoted, z-index capped, safe colour kept`, sty.bgImage === 'none' && sty.position !== 'fixed' && Number(sty.z) <= 100 && sty.color === 'rgb(1, 2, 3)', JSON.stringify(sty));
+    const cls = await page.evaluate(() => ({ cls: document.getElementById('v-cls').className, size: getComputedStyle(document.getElementById('v-cls')).fontSize }));
+    check(`${tag} class grammar: url class dropped, numeric arbitrary value kept`, !/url/.test(cls.cls) && cls.size === '11px', JSON.stringify(cls));
+    check(`${tag} nothing was fetched from the network`, steals.length === 0, `steals=${steals.length}`);
+
+    // Data that is not registered never enters the box.
+    await page.evaluate(() => window.__veneer.setUi("render(<div id='leak'>{(() => { try { return JSON.stringify(veneer.data('secrets')); } catch (e) { return 'threw:' + e.message; } })()}</div>)"));
+    await page.locator('#v-leak').waitFor({ timeout: 20000 });
+    const leak = await page.locator('#v-leak').textContent();
+    check(`${tag} unregistered data source is not in the box`, /^threw/.test(leak), leak);
+    check(`${tag} secret never appears in the document`, !(await page.content()).includes('do-not-leak'));
+
+    // Wall 3: the interpreter's deadline. A hot loop at start-up can never finish "starting".
+    await page.evaluate(() => window.__veneer.setUi("render(<div id='hot'>hot</div>); while (true) {}"));
+    await waitState(page, () => window.__events.some((e) => e.kind === 'canvas-violation'), 25000);
+    const ev1 = await canvasEvents(page);
+    check(`${tag} hot loop at start-up → engine-fatal violation`, ev1.some((e) => e.kind === 'canvas-violation' && e.reason === 'engine-fatal') && ev1.some((e) => e.kind === 'violation' && e.reason === 'engine-fatal'), JSON.stringify(ev1.map((e) => e.reason || e.type)));
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    check(`${tag} default UI is back in a fresh worker after the violation`, (await page.locator('#v-count').textContent()) === '2' && (await page.evaluate(() => window.__veneer.ui === window.__veneer.defaultUI)));
+
+    // A hot loop in an event handler after start-up: each entry blows its 250ms budget and is
+    // interrupted (the page never freezes); three in a row ends the box.
+    await page.evaluate(() => window.__veneer.setUi("render(<button id='burn' onClick={() => { while (true) {} }}>burn</button>);"));
+    await page.locator('#v-burn').waitFor({ timeout: 20000 });
+    const t0 = Date.now();
+    for (let i = 0; i < 3; i++) {
+      await page.locator('#v-burn').click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(400);
+    }
+    const pageResponsive = Date.now() - t0 < 6000;
+    await waitState(page, () => window.__events.filter((e) => e.kind === 'canvas-violation').length >= 2, 25000);
+    const ev2 = await canvasEvents(page);
+    check(`${tag} hot loop in a handler is interrupted and the page stays responsive`, pageResponsive && ev2.some((e) => e.kind === 'error' && e.errKind === 'timeout' && e.stage === 'event'), JSON.stringify(ev2.filter((e) => e.kind === 'error').map((e) => [e.type, e.errKind, e.stage])).slice(0, 300));
+    check(`${tag} three timeouts in a row → engine-fatal`, ev2.filter((e) => e.kind === 'canvas-violation' && e.reason === 'engine-fatal').length >= 2, JSON.stringify(ev2.map((e) => e.reason || e.type)));
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    check(`${tag} default UI is back again`, (await page.locator('#v-count').textContent()) === '2');
+    const engineErrors = (await canvasEvents(page)).filter((e) => e.kind === 'error' && e.type === 'runtime-timeout');
+    check(`${tag} no engine start-up failures`, engineErrors.length === 0, JSON.stringify(engineErrors).slice(0, 200));
+    if (strict) check(`${tag} no CSP violations under a strict policy`, cspViolations.length === 0, cspViolations.join(' | ').slice(0, 300));
+  } catch (e) {
+    check(`${tag} scenario threw`, false, e.message.split('\n')[0]);
+  }
+  await context.close();
+}
+
+// Dark mode: the `.veneer-dark` class on the canvas root drives the `dark:` variant.
+if (ONLY !== 'frame') {
+  const { context, page } = await newPage();
+  await page.goto(`${base}/canvas?dark=1`);
+  try {
+    await page.locator('#v-brand').waitFor({ timeout: 20000 });
+    const probe = await page.evaluate(() => {
+      const root = document.querySelector('[data-veneer-engine="worker"]');
+      const cs = getComputedStyle(document.getElementById('v-brand'));
+      return { dark: root.classList.contains('veneer-dark'), bg: cs.backgroundColor, bgVar: getComputedStyle(root).getPropertyValue('--veneer-background').trim() };
+    });
+    check('[canvas dark] canvas root carries .veneer-dark', probe.dark === true);
+    check('[canvas dark] dark:bg-accent wins over bg-primary', probe.bg === 'rgb(124, 58, 237)', probe.bg);
+    check('[canvas dark] per-mode background variable', probe.bgVar === '#101418', probe.bgVar);
+  } catch (e) {
+    check('[canvas dark] scenario threw', false, e.message.split('\n')[0]);
+  }
+  await context.close();
 }
 
 await browser.close();

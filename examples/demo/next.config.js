@@ -1,21 +1,24 @@
 const isProd = process.env.NODE_ENV === 'production';
 
 /**
- * Security headers for the site's own pages. `/veneer-frame` is excluded on purpose: that route
- * serves the sandbox document with its own, much stricter Content-Security-Policy (set by
- * `buildFrameResponse`), and a page-level `frame-ancestors`/`X-Frame-Options` would fight it.
+ * Security headers for the site. The Veneer engine runs generated code in a QuickJS interpreter
+ * compiled to WebAssembly, inside a same-origin Web Worker (`/veneer-worker.js`, copied from
+ * `@veneer/react/dist` by the `prebuild`/`predev` scripts). That needs exactly two allowances:
+ * `'wasm-unsafe-eval'` in `script-src` (compiling wasm, never JavaScript eval) and `worker-src 'self'`.
+ * Generated code itself never gets a CSP because it never runs in a browser realm at all.
  */
 const csp = [
   "default-src 'self'",
   // Next.js needs inline bootstrap scripts; Vercel Analytics loads from va.vercel-scripts.com.
   // Dev mode additionally needs eval for React Refresh.
-  `script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com${isProd ? '' : " 'unsafe-eval'"}`,
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://va.vercel-scripts.com${isProd ? '' : " 'unsafe-eval'"}`,
+  "worker-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   // The waitlist toast asks ipapi.co for a coarse location; analytics beacons go to Vercel.
   "connect-src 'self' https://ipapi.co https://va.vercel-scripts.com https://vitals.vercel-insights.com",
-  "frame-src 'self'",
+  "frame-src 'none'",
   "frame-ancestors 'self'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -37,9 +40,14 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Every path except the sandbox document.
-        source: '/((?!veneer-frame$).*)',
+        source: '/(.*)',
         headers: securityHeaders,
+      },
+      {
+        // The engine worker is a versioned build product; a fresh deploy ships a fresh copy, and the
+        // canvas fetches it by a stable path, so it may be cached for a day.
+        source: '/veneer-worker.js',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, must-revalidate' }],
       },
     ];
   },

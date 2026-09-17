@@ -5,6 +5,22 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
 
 ## Unreleased
 
+### Added
+
+- **Engine v2: `VeneerCanvas`.** Generated code now runs in a QuickJS interpreter (WebAssembly)
+  inside a Web Worker and only ever describes what to draw; the page redraws that description with
+  its own React through an allowlist (elements, attributes, styles, class names), as real DOM in the
+  host page — no iframe. Tailwind v4 is compiled in the worker for exactly the classes used, brand
+  tokens map to the `--veneer-*` variables, and the stylesheet is scoped to the canvas and installed
+  via `adoptedStyleSheets`. Every entry into the interpreter has a CPU deadline, memory and stack
+  are capped, and a heartbeat terminates a worker that stops answering. Ships as
+  `dist/veneer-worker.js`; hosts serve it same-origin and, with a CSP, allow `'wasm-unsafe-eval'`
+  and `worker-src 'self'`. `VeneerFrame` remains exported for one release.
+- The server prompt describes the interpreter (no `alert`/`confirm`/`prompt`, no links or images,
+  arbitrary Tailwind values limited to lengths and hex colours).
+- Demo: runs on `VeneerCanvas`; the `/veneer-frame` route is gone; a `prebuild` step copies the
+  worker into `public/`.
+
 ### Fixed
 
 - The sandbox frame loaded Tailwind from a patch-version Play CDN path
