@@ -7,6 +7,12 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
 
 ### Fixed
 
+- The sandbox frame loaded Tailwind from a patch-version Play CDN path
+  (`cdn.tailwindcss.com/3.4.19`). The Play CDN does not guarantee every such path is served, and a
+  miss failed silently (no SRI) and left every generated view completely unstyled while React still
+  rendered. The frame now loads Tailwind from its documented origin, and reports an `error`
+  (kind `style`) to the host if the runtime is still missing at init instead of failing silently.
+
 - `useVeneerGenerate` no longer rejects chat and clarification turns for lacking a license token;
   only responses that carry code are checked. Rapid double submits are guarded synchronously.
   The unlicensed DEV token now produces an actionable message when used off localhost, and the
@@ -27,7 +33,10 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
   capped; OpenAI/Anthropic request bodies use the parameters those APIs accept.
 - Core: license tokens live 26 h (24 h offline grace + skew); `iat` in the future no longer
   rejects a token; the scanner refuses `<link>`, `<meta>`, `<iframe>`, `<script>`, `<style>` and
-  similar elements and computed member access built from expressions.
+  similar elements, and computed member access whose key is built from strings
+  (`o['con' + 'structor']`, template literals with expressions, `.join()`/`atob()` results).
+  Numeric indexing such as `months[parseInt(x) - 1]` is allowed; an earlier draft of this rule
+  refused it and made the sandbox reject the demo's default view on every load.
 
 ### Changed
 
