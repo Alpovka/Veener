@@ -1,0 +1,13 @@
+{
+  "name": "veneer",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @veneer/react",
+    "build:demo": "npm run build -w veneer-demo"
+  }
+}

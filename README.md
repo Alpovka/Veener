@@ -24,17 +24,20 @@ writes free-form code.
 It's "MCP for the UI layer": you expose a typed, described capability surface; the model composes
 against it; a sandbox enforces the boundary.
 
-This repo has two **separate** projects:
+This repo is an npm workspace:
 
 ```
 veneer/
-├── veneer-sdk/     # the embeddable React SDK (publishable npm package, plain JavaScript)
-└── veneer-demo/    # a polished Next.js demo app that consumes the SDK locally
+├── packages/core/     # @veneer/core   (MIT)  shared validators, scanner, frame document, theme
+├── packages/react/    # @veneer/react  (MIT)  VeneerProvider, VeneerFrame, useVeneerGenerate
+├── packages/server/   # @veneer/server (commercial) createVeneerHandler, buildFrameResponse, license client
+├── packages/cloud/    # @veneer/cloud  reference Veneer Cloud: API keys, quota, token signing, hosted generation
+└── examples/demo/     # the Next.js demo site (consumes the packages from the workspace)
 ```
 
-The website (`veneer-demo`) depends on a copy of the package at `veneer-demo/veneer-sdk`
-(`"veneer-sdk": "file:./veneer-sdk"`, so Vercel can build it). `veneer-sdk/` is the source of
-truth; run `npm run sync-demo` in `veneer-sdk` after changing it.
+Product shape: the client is open and readable (security never depends on secrecy); the
+generation endpoint is either self-hosted with `@veneer/server` and a license key, or Veneer
+Cloud with an API key. Your LLM key stays yours in both cases.
 
 ---
 
@@ -76,10 +79,10 @@ forbid that. Veneer neutralises anchor clicks and form posts, rejects `location`
 detects and shuts down any navigation, but a deliberate bypass could encode data *already inside
 the frame* into that first URL. Push only data you would show that user on screen anyway. The other
 residuals (host CSP inheritance and the `frameSrc` fix, CPU hot loops, UI spoofing) are in
-`veneer-sdk/README.md`.
+`packages/react/README.md`.
 
 **The server owns the registry.** The client sends `{ message, history, currentUI }` only; the
-generator endpoint (`createVeneerHandler` from `veneer-sdk/server`) builds the prompt from *its*
+generator endpoint (`createVeneerHandler` from `@veneer/server`) builds the prompt from *its*
 registry, requires same-origin JSON requests, caps sizes, rate-limits, times out the model and scans
 the result. It is not an open LLM proxy.
 
@@ -87,7 +90,7 @@ the result. It is not an open LLM proxy.
 generated UI and the chat widget take the host brand: the tokens become `--veneer-*` variables in the
 sandbox, Tailwind utilities like `bg-primary` / `text-foreground` / `rounded-md` resolve to them, the
 model is told to use that vocabulary, fonts are inlined as data URIs, and `autoHeight` lets the canvas
-flow with the page. See `veneer-sdk/README.md` → Branding.
+flow with the page.
 
 Customizations are **per-user and private**: the generated UI is stored in `localStorage` under a
 key you choose (`storageKey`, e.g. `veneer-ui:<userId>`). No sharing in this version.
@@ -131,7 +134,7 @@ The registry's plain-English descriptions are handed to the model so it knows wh
 registry's ids are what the bridge enforces at runtime. Generated code reads data via
 `veneer.data('tasks')` and triggers actions via `veneer.action('updateTask', { id, status })`.
 
-See **`veneer-sdk/README.md`** for the full SDK API.
+See **`packages/react/README.md`** and **`packages/server/README.md`** for the API.
 
 ---
 
@@ -140,15 +143,13 @@ See **`veneer-sdk/README.md`** for the full SDK API.
 You'll need **Node 18+** and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)).
 
 ```bash
-# 1. Install the SDK (server deps + test tooling) and run its tests
-cd veneer-sdk
+# 1. Install the workspace and run the tests
 npm install
-npm test            # unit tests
-npm run test:e2e    # browser tests in Chromium (sandbox, bridge, CSP, navigation detection)
+npm test                       # unit tests for all packages
+npm run test:e2e               # browser tests in Chromium (sandbox, bridge, CSP, navigation detection)
 
-# 2. Install the demo (this links its veneer-sdk copy via file:./veneer-sdk)
-cd ../veneer-demo
-npm install
+# 2. Configure the demo
+cd examples/demo
 
 # 3. Add your API key
 cp .env.local.example .env.local
@@ -185,5 +186,5 @@ Both projects are plain JavaScript.
 
 - Generated UI is stored per-user in `localStorage["veneer-ui"]`. “Reset to default” reverts it.
 - The demo's task data is in-memory — “Reset data” restores the sample tasks.
-- The product logo is the layered-"V" mark in `veneer-sdk/src/VeneerLogo.js` (a thin *veneer*
+- The product logo is the layered-"V" mark in `examples/demo/app/_components/VeneerLogo.js` (a thin *veneer*
   laid over the real material underneath).
