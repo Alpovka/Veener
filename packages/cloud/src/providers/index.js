@@ -56,8 +56,8 @@ export function createProvider({ provider, key, model, fetch: fetchImpl }) {
         signal,
         body: JSON.stringify({
           model: m,
-          temperature: 0.4,
-          max_tokens: 12000,
+          // reasoning models reject `max_tokens` and sampling params; `max_completion_tokens` works on all
+          max_completion_tokens: 12000,
           response_format: { type: 'json_object' },
           messages: [{ role: 'system', content: system }, ...messages.map((x) => ({ role: x.role, content: x.content }))],
         }),
@@ -75,7 +75,7 @@ export function createProvider({ provider, key, model, fetch: fetchImpl }) {
       body: JSON.stringify({
         model: m,
         max_tokens: 12000,
-        temperature: 0.4,
+        // no temperature: current Claude models reject sampling parameters
         system,
         messages: messages.map((x) => ({ role: x.role === 'assistant' ? 'assistant' : 'user', content: x.content })),
       }),

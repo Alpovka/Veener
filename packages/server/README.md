@@ -1,7 +1,7 @@
 # @veneer/server
 
 The generation endpoint for Veneer, for any Fetch-API runtime (Next.js route handlers, Remix,
-Hono, Bun, Deno, Node 18+). It owns the registry, builds the prompt, guards the request, calls
+Hono, Bun, Deno, Node 20+). It owns the registry, builds the prompt, guards the request, calls
 **your** LLM through a callback, scans the generated code and never leaks provider errors.
 
 Commercial license: requires a Veneer license key. Prefer Veneer Cloud if you do not want to

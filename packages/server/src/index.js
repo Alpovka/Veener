@@ -1,6 +1,6 @@
 /**
  * @veneer/server — the host-side generator endpoint and the frame document, for any runtime
- * that speaks the Fetch API (Next.js route handlers, Remix, Hono, Bun, Deno, Node 18+).
+ * that speaks the Fetch API (Next.js route handlers, Remix, Hono, Bun, Deno, Node 20+).
  *
  * The SERVER owns the registry. The client sends only { message, history, currentUI }; whatever
  * else it sends is ignored. This is what stops the endpoint from being a general-purpose LLM
@@ -14,6 +14,8 @@ import { createLicenseClient, createDevLicenseClient, LicenseError } from './lic
 
 export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS, classifyIntent, resolveIntent, INTENTS } from './generation.js';
 export { createLicenseClient, LicenseError, DEFAULT_LICENSE_API } from './license.js';
+// Shared helpers hosts may need server-side (the core workspace is bundled, not published).
+export { hashRegistryShape, verifyLicenseToken, LICENSE_PUBLIC_KEYS, FRAME_CSP, FRAME_SANDBOX } from '@veneer/core';
 
 export const DEFAULT_HANDLER_OPTIONS = {
   ...GENERATION_LIMITS,
@@ -53,6 +55,11 @@ export function createMemoryRateLimiter({ limit = 20, windowMs = 60000, now = ()
   };
 }
 
+/**
+ * Rate-limit key. Trusts `x-forwarded-for` (first hop), which is only safe behind a proxy that sets
+ * it (Vercel, Cloudflare, nginx with real_ip). Pass your own `rateLimit(key)` if you need a
+ * different identity (a session id, an API key).
+ */
 export function clientKey(request) {
   const h = request.headers;
   const xff = h.get('x-forwarded-for');
@@ -119,6 +126,16 @@ export function createVeneerHandler(opts) {
   }
   const license = cloudMode ? null : o.license === false ? createDevLicenseClient() : (o.licenseClient || createLicenseClient({ licenseKey: o.licenseKey, apiBase: o.licenseApiBase, fetch: o.fetch, onError: (e) => log(e, { stage: 'license' }) }));
   const fetchImpl = o.fetch || (typeof fetch === 'function' ? fetch : null);
+  if (cloudMode && !fetchImpl) throw new Error('createVeneerHandler: fetch is not available in this runtime (pass `fetch`)');
+  if (!cloudMode && o.license === false && typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') {
+    log(new Error('createVeneerHandler runs with license:false in production; @veneer/react accepts the DEV token on localhost only'), { stage: 'config' });
+  }
+  const allowedOrigins = Array.isArray(o.allowedOrigins) ? o.allowedOrigins : [];
+  const corsHeaders = (request) => {
+    const origin = request.headers.get('origin');
+    if (!origin || !allowedOrigins.includes(origin)) return {};
+    return { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'content-type, authorization', 'access-control-allow-methods': 'POST, OPTIONS', vary: 'origin' };
+  };
 
   let allow;
   if (o.rateLimit === false) allow = async () => true;
@@ -126,11 +143,16 @@ export function createVeneerHandler(opts) {
   else allow = createMemoryRateLimiter(o.rateLimit || {});
 
   return async function handler(request) {
+    const cors = corsHeaders(request);
     try {
-      if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405, { allow: 'POST' });
+      if (request.method === 'OPTIONS') {
+        // Cross-origin embeds listed in `allowedOrigins` need a preflight answer; everyone else gets nothing.
+        return new Response(null, { status: Object.keys(cors).length ? 204 : 405, headers: { ...cors, 'access-control-max-age': '600', allow: 'POST, OPTIONS' } });
+      }
+      if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405, { allow: 'POST, OPTIONS', ...cors });
 
       const originCheck = checkRequestOrigin(request, o);
-      if (!originCheck.ok) return json({ error: originCheck.error }, originCheck.status);
+      if (!originCheck.ok) return json({ error: originCheck.error }, originCheck.status, cors);
 
       if (typeof o.authorize === 'function') {
         let authorized = false;
@@ -184,36 +206,47 @@ export function createVeneerHandler(opts) {
             out = null;
           }
           if (res.status === 401 || res.status === 402 || res.status === 403) {
-            log(new Error(`cloud refused: ${res.status}`), { stage: 'cloud', body: out });
-            return json({ error: (out && out.error) || 'Veneer Cloud refused the request. Check your API key and plan.', code: (out && out.code) || 'cloud-refused' }, res.status);
+            log(new Error(`cloud refused: ${res.status}`), { stage: 'cloud', code: out && out.code });
+            return json({ error: (out && out.error) || 'Veneer Cloud refused the request. Check your API key and plan.', code: (out && out.code) || 'cloud-refused' }, res.status, cors);
+          }
+          if (res.status === 429) {
+            log(new Error('cloud rate-limited'), { stage: 'cloud', code: out && out.code });
+            return json({ error: (out && out.error) || 'Too many requests. Please wait a moment.', code: (out && out.code) || 'rate-limited' }, 429, { 'retry-after': res.headers.get('retry-after') || '30', ...cors });
+          }
+          if (res.status === 400 && out && out.code) {
+            // Misconfigured LLM key or provider on our side of the call: tell the operator, not a generic 502.
+            log(new Error(`cloud rejected the request: ${out.code}`), { stage: 'cloud', code: out.code });
+            return json({ error: out.error || 'Veneer Cloud rejected the request.', code: out.code }, 502, cors);
           }
           if (!res.ok || !out || typeof out !== 'object') {
-            log(new Error(`cloud error: ${res.status}`), { stage: 'cloud' });
-            return json({ error: 'The design service failed. Please try again.' }, 502);
+            log(new Error(`cloud error: ${res.status}`), { stage: 'cloud', code: out && out.code });
+            return json({ error: 'The design service failed. Please try again.' }, 502, cors);
           }
-          return json({ code: typeof out.code === 'string' ? out.code : null, intent: ['design', 'chat', 'clarify'].includes(out.intent) ? out.intent : out.code ? 'design' : 'chat', reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, token: out.token, remaining: out.remaining });
+          return json({ code: typeof out.code === 'string' ? out.code : null, intent: ['design', 'chat', 'clarify'].includes(out.intent) ? out.intent : out.code ? 'design' : 'chat', reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, repaired: out.repaired, token: out.token, remaining: out.remaining }, 200, cors);
         }
 
-        // Self-hosted: license first, then the pipeline.
+        // Self-hosted: run the pipeline, then license the result. Only design turns that produced
+        // code count against the license; chat replies, clarifications and refusals are free.
+        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, log });
+        if (result.code == null) return json(result, 200, cors);
         let lic;
         try {
           lic = await license.assertGeneration({ registryHash });
         } catch (e) {
           if (e instanceof LicenseError) {
             log(e, { stage: 'license' });
-            return json({ error: e.code === 'quota-exceeded' ? 'Veneer license quota exceeded for this period.' : e.code === 'unreachable' ? 'Veneer license service unreachable.' : 'Veneer license key invalid or inactive.', code: e.code }, e.status === 503 ? 503 : 402);
+            return json({ error: e.code === 'quota-exceeded' ? 'Veneer license quota exceeded for this period.' : e.code === 'unreachable' ? 'Veneer license service unreachable.' : 'Veneer license key invalid or inactive.', code: e.code }, e.status === 503 ? 503 : 402, cors);
           }
           throw e;
         }
-        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, log });
-        return json({ ...result, token: lic.token, ...(lic.stale ? { licenseStale: true } : {}) });
+        return json({ ...result, token: lic.token, remaining: lic.remaining, ...(lic.stale ? { licenseStale: true } : {}) }, 200, cors);
       } finally {
         clearTimeout(timer);
       }
     } catch (e) {
       log(e, { stage: 'handler' });
       const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));
-      return json({ error: aborted ? 'The design service timed out. Please try again.' : 'The design service failed. Please try again.' }, aborted ? 504 : 500);
+      return json({ error: aborted ? 'The design service timed out. Please try again.' : 'The design service failed. Please try again.' }, aborted ? 504 : 500, cors);
     }
   };
 }

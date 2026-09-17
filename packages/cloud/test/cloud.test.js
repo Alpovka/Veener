@@ -62,11 +62,13 @@ describe('hosted generation', () => {
     const v = await verifyLicenseToken(body.token, { publicKeys: [kp.publicKey], registryHash: hashRegistryShape(registry) });
     expect(v.ok).toBe(true);
   });
-  it('refuses unregistered capabilities and reports scan blocks like the self-hosted handler', async () => {
-    const { call } = await setup({ provider: () => async () => JSON.stringify({ code: 'render(<b onClick={() => veneer.action("deleteTask")}/>)', reply: 'x' }) });
+  it('refuses unregistered capabilities and reports scan blocks like the self-hosted handler; refusals and chat are not metered', async () => {
+    const { call, store } = await setup({ provider: () => async () => JSON.stringify({ code: 'render(<b onClick={() => veneer.action("deleteTask")}/>)', reply: 'x' }) });
     const body = await (await call('/v1/generate', { registry, message: 'delete', llm: { provider: 'openai', key: 'o' } })).json();
     expect(body.code).toBeNull();
     expect(body.blocked[0]).toMatch(/deleteTask/);
+    expect(body.token).toBeUndefined();
+    expect(await store.getUsage('key_1')).toBe(0);
   });
   it('validates input and maps provider failures without leaking details', async () => {
     const { call, store } = await setup({ provider: () => async () => { const e = new Error('openai 401: invalid api key sk-abc'); e.status = 401; throw e; } });
@@ -78,7 +80,7 @@ describe('hosted generation', () => {
     const body = await res.json();
     expect(body.code).toBe('llm-auth');
     expect(JSON.stringify(body)).not.toContain('sk-abc');
-    expect(await store.getUsage('key_1')).toBe(1); // a failed LLM call still counts as a metered attempt
+    expect(await store.getUsage('key_1')).toBe(0); // provider failures are not charged
   });
   it('rejects non-JSON, unknown routes and answers health', async () => {
     const { app } = await setup();
@@ -90,10 +92,14 @@ describe('hosted generation', () => {
 
 describe('helpers', () => {
   it('parses keys from env', () => {
-    expect(keysFromEnv('vn_live_a:pro:10000, vn_live_b:starter')).toEqual([
-      { id: 'key_1', secret: 'vn_live_a', plan: 'pro', monthlyQuota: 10000, active: true },
-      { id: 'key_2', secret: 'vn_live_b', plan: 'starter', monthlyQuota: 1000, active: true },
+    const keys = keysFromEnv('vn_live_a:pro:10000, vn_live_b:starter, vn_live_c:pro:abc');
+    expect(keys.map((k) => [k.secret, k.plan, k.monthlyQuota, k.active])).toEqual([
+      ['vn_live_a', 'pro', 10000, true],
+      ['vn_live_b', 'starter', 1000, true],
+      ['vn_live_c', 'pro', 1000, true], // NaN quota falls back instead of becoming unlimited
     ]);
+    expect(keys[0].id).toMatch(/^key_[a-z0-9]+$/);
+    expect(keysFromEnv('vn_live_b:starter, vn_live_a:pro')[1].id).toBe(keys[0].id); // id follows the secret, not the position
   });
   it('builds provider requests with the customer key and returns text', async () => {
     const f = vi.fn(async (url, init) => ({ ok: true, json: async () => (url.includes('googleapis') ? { candidates: [{ content: { parts: [{ text: '{"a":1}' }] } }] } : url.includes('openai') ? { choices: [{ message: { content: 'oa' } }] } : { content: [{ type: 'text', text: 'an' }] }) }));

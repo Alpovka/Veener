@@ -4,18 +4,33 @@
   "description": "Veneer generation endpoint for any Fetch-API runtime: owns the registry, builds the prompt, guards the request, calls your LLM, scans the generated code. Requires a Veneer license key.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
-  "main": "./src/index.js",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./package.json": "./package.json"
   },
-  "files": ["src", "README.md", "LICENSE"],
-  "scripts": { "test": "vitest run" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepare": "node build.mjs",
+    "prepack": "node build.mjs",
+    "test": "vitest run"
+  },
+  "keywords": ["veneer", "ai", "ui-generation", "llm", "nextjs"],
+  "repository": { "type": "git", "url": "git+https://github.com/Alpovka/Alter.git", "directory": "packages/server" },
+  "homepage": "https://github.com/Alpovka/Alter/tree/main/packages/server#readme",
+  "bugs": { "url": "https://github.com/Alpovka/Alter/issues" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" },
   "dependencies": {
     "@babel/parser": "^7.29.0",
-    "@babel/traverse": "^7.29.0",
-    "@veneer/core": "0.3.0"
+    "@babel/traverse": "^7.29.0"
   },
   "devDependencies": {
+    "@veneer/core": "0.3.0",
+    "esbuild": "^0.28.2",
     "vitest": "^5.0.0"
   }
 }

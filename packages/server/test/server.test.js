@@ -132,7 +132,7 @@ describe('createVeneerHandler', () => {
 
   it('handles code:null, unparsable output, and oversized code', async () => {
     const mk = (out) => createVeneerHandler({ registry, license: false, rateLimit: false, maxCurrentUIChars: 100, generate: async () => out });
-    expect(await (await mk(JSON.stringify({ intent: 'design', code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, intent: 'design', reply: 'Nope', token: 'dev' });
+    expect(await (await mk(JSON.stringify({ intent: 'design', code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, intent: 'design', reply: 'Nope' });
     expect((await (await mk('total garbage')(req({ message: 'x' }))).json()).code).toBeNull();
     const big = await (await mk(JSON.stringify({ code: 'render(<b>' + 'x'.repeat(200) + '</b>)', reply: 'ok' }))(req({ message: 'x' }))).json();
     expect(big.code).toBeNull();
@@ -265,22 +265,30 @@ describe('license client', () => {
     await expect(c.assertGeneration()).rejects.toMatchObject({ code: 'quota-exceeded', status: 402 });
     expect(() => createLicenseClient({})).toThrow(LicenseError);
   });
-  it('the handler refuses generation when the license refuses, and passes the token through otherwise', async () => {
-    const generate = vi.fn(async () => JSON.stringify({ code: null, reply: 'ok' }));
-    const refusing = { assertGeneration: async () => { throw new LicenseError('no', 402, 'quota-exceeded'); } };
+  it('licenses only design turns: chat replies are free, refused licenses block code, tokens pass through', async () => {
+    const chat = vi.fn(async () => JSON.stringify({ intent: 'chat', code: null, reply: 'hello' }));
+    const refusing = { assertGeneration: vi.fn(async () => { throw new LicenseError('no', 402, 'quota-exceeded'); }) };
+    const hChat = createVeneerHandler({ registry, generate: chat, licenseKey: 'k', licenseClient: refusing, rateLimit: false });
+    const chatRes = await hChat(req({ message: 'hi there' }));
+    expect(chatRes.status).toBe(200);
+    expect(await chatRes.json()).toEqual({ code: null, intent: 'chat', reply: 'hello' });
+    expect(refusing.assertGeneration).not.toHaveBeenCalled();
+
+    const generate = vi.fn(async () => JSON.stringify({ intent: 'design', code: OK_CODE, reply: 'ok' }));
     const h = createVeneerHandler({ registry, generate, licenseKey: 'k', licenseClient: refusing, rateLimit: false });
-    const res = await h(req({ message: 'x' }));
+    const res = await h(req({ message: 'make a board' }));
     expect(res.status).toBe(402);
     expect((await res.json()).code).toBe('quota-exceeded');
-    expect(generate).not.toHaveBeenCalled();
 
     const kp = await generateKeyPair();
     const priv = await importPrivateKey(kp.privateKey);
     const token = await signLicenseToken({ sub: 'key', reg: hashRegistryShape(registry) }, priv);
-    const granting = { assertGeneration: async () => ({ token, plan: 'pro', stale: true }) };
+    const granting = { assertGeneration: async () => ({ token, plan: 'pro', remaining: 7, stale: true }) };
     const h2 = createVeneerHandler({ registry, generate, licenseKey: 'k', licenseClient: granting, rateLimit: false });
-    const body = await (await h2(req({ message: 'x' }))).json();
+    const body = await (await h2(req({ message: 'make a board' }))).json();
+    expect(body.code).toBe(OK_CODE);
     expect(body.token).toBe(token);
+    expect(body.remaining).toBe(7);
     expect(body.licenseStale).toBe(true);
     expect((await verifyLicenseToken(token, { publicKeys: [kp.publicKey], registryHash: hashRegistryShape(registry) })).ok).toBe(true);
   });
@@ -292,7 +300,7 @@ describe('cloud mode', () => {
     const h = createVeneerHandler({ registry, brand: { name: 'Acme' }, cloud: { apiKey: 'vn_cloud_1', apiBase: 'https://cloud.test/', llm: { provider: 'gemini', key: 'gk', model: 'gemini-2.5-flash' } }, fetch: f, rateLimit: false });
     const res = await h(req({ message: 'board', history: [{ role: 'assistant', content: 'hi' }], currentUI: 'cur', registry: { actions: [{ id: 'deleteTask' }] } }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ code: OK_CODE, intent: 'design', reply: 'from cloud', blocked: undefined, token: 't', remaining: undefined });
+    expect(await res.json()).toEqual({ code: OK_CODE, intent: 'design', reply: 'from cloud', blocked: undefined, repaired: undefined, token: 't', remaining: undefined });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe('https://cloud.test/v1/generate');
     expect(init.headers.authorization).toBe('Bearer vn_cloud_1');
@@ -312,5 +320,24 @@ describe('cloud mode', () => {
     expect((await res.json()).code).toBe('quota-exceeded');
     res = await h(req({ message: 'x' }));
     expect(res.status).toBe(502);
+  });
+});
+
+describe('allowedOrigins (CORS)', () => {
+  it('answers preflights and echoes the origin only for allowed origins', async () => {
+    const generate = vi.fn(async () => JSON.stringify({ intent: 'chat', code: null, reply: 'ok' }));
+    const h = createVeneerHandler({ registry, generate, license: false, rateLimit: false, allowedOrigins: ['https://embed.example'] });
+    const pre = await h(new Request('http://host.test/api/veneer', { method: 'OPTIONS', headers: { origin: 'https://embed.example', 'access-control-request-method': 'POST' } }));
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-origin')).toBe('https://embed.example');
+    const preBad = await h(new Request('http://host.test/api/veneer', { method: 'OPTIONS', headers: { origin: 'https://evil.example' } }));
+    expect(preBad.status).toBe(405);
+    expect(preBad.headers.get('access-control-allow-origin')).toBeNull();
+    const res = await h(req({ message: 'hi' }, { origin: 'https://embed.example', 'sec-fetch-site': 'cross-site' }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://embed.example');
+    const denied = await h(req({ message: 'hi' }, { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }));
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

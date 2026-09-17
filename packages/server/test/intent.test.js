@@ -39,6 +39,16 @@ describe('classifyIntent (local heuristics)', () => {
   it.each(clarify)('reads "%s" as clarify', (m) => {
     expect(classifyIntent(m).intent).toBe('clarify');
   });
+  it('does not let a greeting or opinion phrasing veto a real change request', () => {
+    for (const m of ['hi make kanban', 'hey add filters', 'Hey, dark mode please', 'how does it look if we make the cards bigger?', 'is this good? make the header bigger']) {
+      expect(classifyIntent(m).intent, m).toBe('design');
+      expect(classifyIntent(m).confidence, m).not.toBe('high');
+    }
+    expect(classifyIntent('show me how it looks in dark mode').intent).toBe('design');
+    expect(classifyIntent('can you explain the kanban?').intent).toBe('chat');
+    expect(classifyIntent('add a task called "how are you"').intent).toBe('design');
+    expect(classifyIntent('design a dashboard for me').intent).toBe('design');
+  });
   it('is unsure about bare nouns and unknown text', () => {
     expect(classifyIntent('kanban').intent).toBe('design');
     expect(classifyIntent('kanban').confidence).toBe('low');
@@ -73,7 +83,7 @@ describe('handler intent gate', () => {
     const onError = vi.fn();
     const h = createVeneerHandler({ registry, generate, license: false, rateLimit: false, onError });
     const body = await (await h(req({ message: 'hey how are you' }))).json();
-    expect(body).toEqual({ code: null, intent: 'chat', reply: 'Hi! I am doing well. Want me to redesign something?', token: 'dev' });
+    expect(body).toEqual({ code: null, intent: 'chat', reply: 'Hi! I am doing well. Want me to redesign something?' });
     expect(onError).toHaveBeenCalled(); // dropped code is logged for prompt tuning
     const sent = generate.mock.calls[0][0];
     expect(sent.system).toContain('FIRST DECIDE THE USER\'S INTENT');
@@ -91,7 +101,7 @@ describe('handler intent gate', () => {
     const generate = vi.fn(async () => JSON.stringify({ intent: 'clarify', code: null, reply: 'Better in what way: layout, colours or density?' }));
     const h = createVeneerHandler({ registry, generate, license: false, rateLimit: false });
     const body = await (await h(req({ message: 'make it better' }))).json();
-    expect(body).toEqual({ code: null, intent: 'clarify', reply: 'Better in what way: layout, colours or density?', token: 'dev' });
+    expect(body).toEqual({ code: null, intent: 'clarify', reply: 'Better in what way: layout, colours or density?' });
   });
   it('still generates for a clear design request and scans it', async () => {
     const generate = vi.fn(async () => JSON.stringify({ intent: 'design', code: OK_CODE, reply: 'Here is your board.' }));

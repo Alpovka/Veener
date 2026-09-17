@@ -5,3 +5,7 @@ node_modules
 .env.local
 .env*.local
 *.log
+dist
+coverage
+*.tgz
+packages/react/spike/guest.bundle.js

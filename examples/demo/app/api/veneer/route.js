@@ -3,6 +3,9 @@ import { createVeneerHandler } from '@veneer/server';
 import { registry } from '../../veneer.config';
 
 export const runtime = 'nodejs';
+// The handler times the model out at 45 s (`timeoutMs`); give the function room to return a
+// friendly error instead of being killed by the platform's default 10–15 s limit.
+export const maxDuration = 60;
 
 const MODEL = 'gemini-2.5-flash';
 

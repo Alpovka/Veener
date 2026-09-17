@@ -51,13 +51,19 @@ export function createCloudApp(opts) {
     return { key };
   }
 
-  async function meter(key) {
+  const hasQuota = (key) => typeof key.monthlyQuota === 'number' && Number.isFinite(key.monthlyQuota);
+  async function checkQuota(key) {
     const used = await store.getUsage(key.id);
-    if (typeof key.monthlyQuota === 'number' && used >= key.monthlyQuota) {
+    if (hasQuota(key) && used >= key.monthlyQuota) {
       return { error: json({ error: `Monthly quota of ${key.monthlyQuota} generations exhausted.`, code: 'quota-exceeded', used, quota: key.monthlyQuota }, 402) };
     }
+    return { used };
+  }
+  async function meter(key) {
+    const q = await checkQuota(key);
+    if (q.error) return q;
     const count = await store.increment(key.id);
-    return { remaining: typeof key.monthlyQuota === 'number' ? Math.max(0, key.monthlyQuota - count) : null };
+    return { remaining: hasQuota(key) ? Math.max(0, key.monthlyQuota - count) : null };
   }
 
   async function mint(key, registryHash) {
@@ -106,13 +112,18 @@ export function createCloudApp(opts) {
     } catch (e) {
       return json({ error: e.message, code: 'bad-llm' }, 400);
     }
-    const m = await meter(a.key);
-    if (m.error) return m.error;
+    // Check the quota before spending the customer's LLM call, but only COUNT a generation once it
+    // produced code: chat replies, clarifications, refusals and provider failures are free.
+    const q = await checkQuota(a.key);
+    if (q.error) return q.error;
     const registryHash = hashRegistryShape(registry);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), o.timeoutMs);
     try {
       const result = await runGeneration({ registry, generate, message: msg, history: sanitizeHistory(history, o), currentUI: cur, brand: brand && typeof brand === 'object' ? { name: brand.name, tone: brand.tone } : undefined, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, log: (e, ctx) => log(e, { ...ctx, key: a.key.id }) });
+      if (result.code == null) return json(result);
+      const m = await meter(a.key);
+      if (m.error) return m.error; // a concurrent request used the last unit
       return json({ ...result, token: await mint(a.key, registryHash), remaining: m.remaining });
     } catch (e) {
       log(e, { stage: 'generate', key: a.key.id });

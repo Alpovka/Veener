@@ -10,7 +10,10 @@ the security model never depends on this code being secret.
 npm install @veneer/react @veneer/server
 ```
 
-Ships untranspiled JSX. With Next.js add `transpilePackages: ['@veneer/react', '@veneer/core']`.
+These are the only two packages. `@veneer/react` has no runtime dependencies besides React 18 or
+19; it ships compiled ESM (JSX already transformed, `'use client'` at the top) and TypeScript
+declarations, so it works in Next.js, Vite, Remix and plain webpack without any bundler
+configuration.
 
 ## Three things, no UI opinions
 
@@ -54,13 +57,19 @@ export default function Page({ userId }) {
   chat box, command palette or button on top. The registry is never sent; the server owns it.
 
 The endpoint is `createVeneerHandler` from `@veneer/server` (self-hosted, license key) or
-Veneer Cloud (hosted, API key). Both return `{ code, reply }`.
+Veneer Cloud (hosted, API key). Both return `{ code, intent, reply, token }`: `code` is `null`
+for chat turns, clarifying questions and refusals, and `token` is the signed license token the hook
+verifies before applying code (chat turns carry none and need none). Pass
+`requireLicense: false` to the hook to skip the check, e.g. in tests. On a runtime without
+WebCrypto the check is skipped as well, because the server already enforced the license.
 
 ## What moved in 0.3
 
 `VeneerChat` and `VeneerLogo` left the SDK; the demo keeps them as examples under
 `examples/demo/app/_components`. Bridge validators, the scanner, the frame document and the
-theme helpers live in `@veneer/core` and are re-exported here where hosts need them.
+theme helpers live in the private `packages/core` workspace, are bundled into this package at
+build time, and are re-exported here where hosts need them (`runBridgeAction`, `validateArgs`,
+`resolveTheme`, `BridgeError`, …).
 
 ## Security model, branding, limits
 
@@ -73,5 +82,6 @@ A worker-based engine that renders natively in your page (no iframe) is in devel
 
 ```bash
 npm test                 # vitest
-npm run test:e2e         # Chromium end-to-end (uses /opt/pw-browsers or CHROME_PATH)
+npm run test:e2e         # Chromium end-to-end (uses /opt/pw-browsers, CHROME_PATH, or Playwright's download)
+npm run build            # esbuild → dist/ (also runs on install and before publish)
 ```

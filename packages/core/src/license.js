@@ -16,7 +16,9 @@
 export const LICENSE_PUBLIC_KEYS = ['3pCfCqRKqaywA5ojT-CDJw87U-5UKj9jF1qoCFMP5mI'];
 
 export const DEV_TOKEN = 'dev';
-export const TOKEN_TTL_SECONDS = 3600;
+/** Tokens are consumed within seconds of minting; the long TTL exists so a self-hosted server's
+ *  24 h outage grace (re-sending the last token) still verifies on the client. */
+export const TOKEN_TTL_SECONDS = 26 * 3600;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -79,6 +81,10 @@ export async function signLicenseToken(claims, privateKey, { kid, now = () => Da
 
 /**
  * Verify a license token against the embedded (or given) public keys.
+ *
+ * Runtimes without WebCrypto Ed25519 (Chrome < 137, Safari < 17, Firefox < 130, insecure http://
+ * origins where `crypto.subtle` is undefined) return `reason: 'unsupported-runtime'` so callers can
+ * decide to fail open; licensing is a control, not a security boundary.
  * @returns {Promise<{ ok: true, claims: object } | { ok: false, reason: string }>}
  */
 export async function verifyLicenseToken(token, { publicKeys = LICENSE_PUBLIC_KEYS, now = () => Date.now(), registryHash, clockSkewSeconds = 300 } = {}) {
@@ -96,7 +102,10 @@ export async function verifyLicenseToken(token, { publicKeys = LICENSE_PUBLIC_KE
   if (!header || header.alg !== 'EdDSA' || header.typ !== 'veneer-license') return { ok: false, reason: 'unsupported' };
   const data = enc.encode(`${parts[0]}.${parts[1]}`);
   const sig = b64urlDecode(parts[2]);
+  const c = globalThis.crypto;
+  if (!c || !c.subtle) return { ok: false, reason: 'unsupported-runtime' };
   let valid = false;
+  let unsupported = 0;
   for (const raw of publicKeys) {
     try {
       const key = await importPublicKey(raw);
@@ -105,13 +114,14 @@ export async function verifyLicenseToken(token, { publicKeys = LICENSE_PUBLIC_KE
         break;
       }
     } catch (e) {
-      /* try the next key */
+      if (e && (e.name === 'NotSupportedError' || /not (available|supported)|unrecognized/i.test(String(e.message || '')))) unsupported++;
+      /* otherwise try the next key */
     }
   }
-  if (!valid) return { ok: false, reason: 'bad-signature' };
+  if (!valid) return { ok: false, reason: unsupported === publicKeys.length && publicKeys.length > 0 ? 'unsupported-runtime' : 'bad-signature' };
   const t = Math.floor(now() / 1000);
   if (typeof claims.exp !== 'number' || claims.exp + clockSkewSeconds < t) return { ok: false, reason: 'expired' };
-  if (typeof claims.iat === 'number' && claims.iat - clockSkewSeconds > t) return { ok: false, reason: 'not-yet-valid' };
+  // No `iat` check: the token is consumed within seconds, and device clocks behind by minutes are common.
   if (claims.evt !== 'generation') return { ok: false, reason: 'wrong-event' };
   if (registryHash && claims.reg && claims.reg !== registryHash) return { ok: false, reason: 'registry-mismatch' };
   return { ok: true, claims };

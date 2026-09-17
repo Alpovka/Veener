@@ -21,8 +21,8 @@ const HOW_ARE_YOU = /\b(how are you|how('?s| is) it going|what'?s up|how do you 
 const OPINION = /\b(what do you think|your (opinion|thoughts|take)|do you (like|think)|thoughts\??|how does (this|it) look|is (this|it) (good|ok|fine|nice))\b/i;
 const QUESTION_WORDS = /^(what|why|how|when|where|who|which|can you|could you|do you|does|is|are|will|should|would)\b/i;
 const CAPABILITY_QUESTION = /\b(what can you do|what are you|who are you|help me understand|explain|tell me about|how does this work|what is this)\b/i;
-const CHANGE_VERBS = /\b(make|turn|convert|change|switch|show|display|add|remove|delete|hide|put|move|place|group|sort|order|filter|arrange|create|build|design|redesign|render|draw|give me|i want|i'?d like|i need|let'?s have|please|can you (make|add|show|change|turn|build|create|remove|put|group|sort))\b/i;
-const UI_NOUNS = /\b(kanban|board|calendar|table|list|grid|card|cards|column|columns|dashboard|chart|timeline|gallery|view|layout|button|header|title|color|colour|font|dark|light|theme|bigger|smaller|wider|compact|dense|spacing|badge|filter|tab|tabs|sidebar|row|rows|section|page|ui|design|style)\b/i;
+const CHANGE_VERBS = /\b(make|turn|convert|change|switch|show|display|add|remove|delete|hide|put|move|place|group|sort|order|filter|arrange|create|build|redesign|render|draw|give me|i want|i'?d like|i need|let'?s have|please|can you (make|add|show|change|turn|build|create|remove|put|group|sort)|design (a|an|me|the|something|it|this))\b/i;
+const UI_NOUNS = /\b(kanban|board|calendar|table|list|grid|card|cards|column|columns|dashboard|chart|timeline|gallery|view|layout|button|header|title|color|colour|font|dark|light|theme|bigger|smaller|wider|compact|dense|spacing|badge|filter|filters|tab|tabs|sidebar|row|rows|section|page|ui|design|style)\b/i;
 const UNDO_REDO = /^(undo|redo|revert|go back|reset|restore)\b/i;
 const VAGUE_CHANGE = /^(make it (better|nicer|prettier|good|great|pop|cleaner)|improve( it| this)?|fix( it| this)?|better|nicer|change it|something else|do something|surprise me)[\s!.]*$/i;
 
@@ -44,10 +44,13 @@ export function classifyIntent(message, ctx = {}) {
   const hasChangeVerb = CHANGE_VERBS.test(m);
   const hasUiNoun = UI_NOUNS.test(m);
 
+  const asksForChange = hasChangeVerb && hasUiNoun; // "hi, make it a kanban" / "how does it look if we make the cards bigger?"
   if (THANKS.test(m)) return { intent: 'chat', confidence: 'high', reasons: ['acknowledgement'] };
   if (HOW_ARE_YOU.test(m) && !hasChangeVerb) return { intent: 'chat', confidence: 'high', reasons: ['small talk'] };
-  if (GREETING.test(m) && words <= 4) return { intent: 'chat', confidence: 'high', reasons: ['greeting'] };
-  if (OPINION.test(m)) return { intent: 'chat', confidence: 'high', reasons: ['asks for an opinion'] };
+  if (GREETING.test(m) && words <= 4 && !asksForChange) return { intent: 'chat', confidence: 'high', reasons: ['greeting'] };
+  if (OPINION.test(m) && !asksForChange) return { intent: 'chat', confidence: 'high', reasons: ['asks for an opinion'] };
+  if (OPINION.test(m) && asksForChange) return { intent: 'design', confidence: 'medium', reasons: ['opinion phrasing but asks for a change'] };
+  if (GREETING.test(m) && asksForChange) return { intent: 'design', confidence: 'medium', reasons: ['greeting followed by a change request'] };
   if (CAPABILITY_QUESTION.test(m) && !hasChangeVerb) return { intent: 'chat', confidence: 'high', reasons: ['asks about capabilities'] };
 
   if (hasChangeVerb && hasUiNoun) {
