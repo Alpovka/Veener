@@ -49,7 +49,7 @@ describe('hosted generation', () => {
   it('runs the pipeline with the customer LLM key and returns code + token', async () => {
     const providerFactory = vi.fn(() => async ({ system, messages }) => {
       expect(system).toContain('createTask');
-      expect(messages.at(-1).content).toContain('User request: board');
+      expect(messages.at(-1).content).toContain('User message: board');
       return JSON.stringify({ code: OK_CODE, reply: 'Board ready' });
     });
     const { call, kp } = await setup({ provider: providerFactory });

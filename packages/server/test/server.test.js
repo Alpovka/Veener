@@ -68,7 +68,7 @@ describe('createVeneerHandler', () => {
     expect(call.system).toBe(buildSystemPrompt(registry));
     expect(call.system).not.toContain('deleteTask');
     expect(call.messages.map((m) => m.role)).toEqual(['assistant', 'user']);
-    expect(call.messages[1].content).toContain('User request: make it a board');
+    expect(call.messages[1].content).toContain('User message: make it a board');
     expect(call.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -132,7 +132,7 @@ describe('createVeneerHandler', () => {
 
   it('handles code:null, unparsable output, and oversized code', async () => {
     const mk = (out) => createVeneerHandler({ registry, license: false, rateLimit: false, maxCurrentUIChars: 100, generate: async () => out });
-    expect(await (await mk(JSON.stringify({ code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, reply: 'Nope', token: 'dev' });
+    expect(await (await mk(JSON.stringify({ intent: 'design', code: null, reply: 'Nope' }))(req({ message: 'x' }))).json()).toEqual({ code: null, intent: 'design', reply: 'Nope', token: 'dev' });
     expect((await (await mk('total garbage')(req({ message: 'x' }))).json()).code).toBeNull();
     const big = await (await mk(JSON.stringify({ code: 'render(<b>' + 'x'.repeat(200) + '</b>)', reply: 'ok' }))(req({ message: 'x' }))).json();
     expect(big.code).toBeNull();
@@ -221,7 +221,7 @@ describe('verify → repair loop', () => {
       .mockResolvedValueOnce(JSON.stringify({ code: 'render(<div>{window.innerWidth}</div>)', reply: 'v1' }))
       .mockResolvedValueOnce(JSON.stringify({ code: 'render(<div>{veneer.data("tasks").length}</div>)', reply: 'v2' }));
     const out = await runGeneration({ registry, generate, message: 'x' });
-    expect(out).toMatchObject({ code: 'render(<div>{veneer.data("tasks").length}</div>)', reply: 'v2', repaired: true });
+    expect(out).toMatchObject({ code: 'render(<div>{veneer.data("tasks").length}</div>)', intent: 'design', reply: 'v2', repaired: true });
     expect(generate).toHaveBeenCalledTimes(2);
     const repairMsgs = generate.mock.calls[1][0].messages;
     expect(repairMsgs.at(-1).content).toMatch(/rejected by the sandbox/);
@@ -292,7 +292,7 @@ describe('cloud mode', () => {
     const h = createVeneerHandler({ registry, brand: { name: 'Acme' }, cloud: { apiKey: 'vn_cloud_1', apiBase: 'https://cloud.test/', llm: { provider: 'gemini', key: 'gk', model: 'gemini-2.5-flash' } }, fetch: f, rateLimit: false });
     const res = await h(req({ message: 'board', history: [{ role: 'assistant', content: 'hi' }], currentUI: 'cur', registry: { actions: [{ id: 'deleteTask' }] } }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ code: OK_CODE, reply: 'from cloud', blocked: undefined, token: 't', remaining: undefined });
+    expect(await res.json()).toEqual({ code: OK_CODE, intent: 'design', reply: 'from cloud', blocked: undefined, token: 't', remaining: undefined });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe('https://cloud.test/v1/generate');
     expect(init.headers.authorization).toBe('Bearer vn_cloud_1');

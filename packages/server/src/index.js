@@ -12,7 +12,7 @@ import { buildFrameHtml, FRAME_CSP, FRAME_SANDBOX, hashRegistryShape } from '@ve
 import { runGeneration, sanitizeHistory, GENERATION_LIMITS } from './generation.js';
 import { createLicenseClient, createDevLicenseClient, LicenseError } from './license.js';
 
-export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS } from './generation.js';
+export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS, classifyIntent, resolveIntent, INTENTS } from './generation.js';
 export { createLicenseClient, LicenseError, DEFAULT_LICENSE_API } from './license.js';
 
 export const DEFAULT_HANDLER_OPTIONS = {
@@ -191,7 +191,7 @@ export function createVeneerHandler(opts) {
             log(new Error(`cloud error: ${res.status}`), { stage: 'cloud' });
             return json({ error: 'The design service failed. Please try again.' }, 502);
           }
-          return json({ code: typeof out.code === 'string' ? out.code : null, reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, token: out.token, remaining: out.remaining });
+          return json({ code: typeof out.code === 'string' ? out.code : null, intent: ['design', 'chat', 'clarify'].includes(out.intent) ? out.intent : out.code ? 'design' : 'chat', reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, token: out.token, remaining: out.remaining });
         }
 
         // Self-hosted: license first, then the pipeline.

@@ -37,7 +37,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
       : [
           'Make this a kanban board grouped by status',
           'Show a calendar by due date',
-          'Give me a colorful dashboard with progress',
+          'What do you think of this design?',
         ];
 
   // When anchor='container', the launcher + panel float inside the nearest
@@ -110,8 +110,8 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
           <div ref={scrollRef} data-lenis-prevent style={S.messages}>
             {history.length === 0 && (
               <div style={S.intro}>
-                Describe how you want this page to look. The AI writes the UI; it can only use
-                the capabilities this app registered.
+                Describe how you want this page to look, or just ask a question. The canvas only
+                changes when you ask for a change; the AI can only use the capabilities this app registered.
                 <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {tips.map((s) => (
                     <button
@@ -133,6 +133,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
             {history.map((m, i) => (
               <div key={i} style={m.role === 'user' ? S.userMsg : S.aiMsg}>
                 {m.content}
+                {m.role === 'assistant' && m.changed && <div style={S.changedTag}>Canvas updated</div>}
               </div>
             ))}
             {violation && (
@@ -274,6 +275,7 @@ function makeStyles(t, dark) {
       fontSize: 13,
       maxWidth: '85%',
     },
+    changedTag: { marginTop: 6, fontSize: 11, fontWeight: 600, color: primary, letterSpacing: 0.2 },
     aiMsg: {
       alignSelf: 'flex-start',
       background: c('surface'),

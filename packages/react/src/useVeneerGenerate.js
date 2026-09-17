@@ -74,9 +74,13 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
             undoStack.current.push(previousUi);
             setUi(json.code);
           }
-          const reply = typeof json.reply === 'string' && json.reply ? json.reply : changed ? 'Done.' : 'No changes made.';
-          setHistory((h) => [...h, { role: 'assistant', content: reply, changed }]);
-          outcome = { ok: true, changed, reply, blocked: json.blocked };
+          // The server applies an intent gate: code arrives only for design requests. Chat turns
+          // (greetings, questions, opinions) come back reply-only and leave the canvas alone.
+          const intent = json.intent === 'chat' || json.intent === 'clarify' || json.intent === 'design' ? json.intent : changed ? 'design' : 'chat';
+          const fallback = changed ? 'Done.' : intent === 'clarify' ? 'Could you tell me more?' : 'No changes made.';
+          const reply = typeof json.reply === 'string' && json.reply ? json.reply : fallback;
+          setHistory((h) => [...h, { role: 'assistant', content: reply, changed, intent }]);
+          outcome = { ok: true, changed, intent, reply, blocked: json.blocked };
         }
       } catch (e) {
         const msg = e && e.name === 'AbortError' ? 'Cancelled.' : 'Network error. Please try again.';
