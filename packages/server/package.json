@@ -1,0 +1,21 @@
+{
+  "name": "@veneer/server",
+  "version": "0.3.0",
+  "description": "Veneer generation endpoint for any Fetch-API runtime: owns the registry, builds the prompt, guards the request, calls your LLM, scans the generated code. Requires a Veneer license key.",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": ["src", "README.md", "LICENSE"],
+  "scripts": { "test": "vitest run" },
+  "dependencies": {
+    "@babel/parser": "^7.29.0",
+    "@babel/traverse": "^7.29.0",
+    "@veneer/core": "0.3.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}
