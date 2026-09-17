@@ -50,13 +50,7 @@ function readStored(store, key, registryHash) {
   try {
     const raw = store.getItem(key);
     if (raw == null) return null;
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      return typeof raw === 'string' ? raw : null; // legacy: bare code string
-    }
-    if (typeof parsed === 'string') return parsed; // legacy JSON string
+    const parsed = JSON.parse(raw);
     if (parsed && parsed.v === ENVELOPE_VERSION && typeof parsed.code === 'string') {
       if (parsed.registryHash && parsed.registryHash !== registryHash) return null;
       return parsed.code;

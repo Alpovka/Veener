@@ -52,12 +52,15 @@ describe('VeneerProvider persistence', () => {
     expect(ctx().generation).toBe(g0 + 2);
   });
 
-  it('isolates providers by storageKey and reads legacy plain-string values', () => {
-    localStorage.setItem('legacy', 'OLD CODE');
-    const a = mount({ persist: 'local', storageKey: 'legacy' });
+  it('isolates providers by storageKey and ignores values that are not envelopes', () => {
+    localStorage.setItem('k1', JSON.stringify({ v: 1, code: 'SAVED' }));
+    localStorage.setItem('junk', 'not an envelope');
+    const a = mount({ persist: 'local', storageKey: 'k1' });
     const b = mount({ persist: 'local', storageKey: 'other' });
-    expect(a.ctx().ui).toBe('OLD CODE');
+    const c = mount({ persist: 'local', storageKey: 'junk' });
+    expect(a.ctx().ui).toBe('SAVED');
     expect(b.ctx().ui).toBe('DEFAULT');
+    expect(c.ctx().ui).toBe('DEFAULT');
   });
 
   it('ignores stored UIs saved under a different registry', () => {

@@ -7,7 +7,7 @@ import { useState } from 'react';
    "Live demo" section of page.js (VeneerFrame + VeneerChat). */
 
 /* ---------- window chrome ---------- */
-export function Dots() {
+function Dots() {
   return (
     <div className="flex items-center gap-1.5">
       <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
@@ -19,25 +19,23 @@ export function Dots() {
 
 // variant: 'light' (always light — used as a screenshot on the dark hero),
 //          'dark'  (always dark), or 'auto' (follows the active theme).
-// `dark` kept for back-compat and maps to variant='dark'.
-export function BrowserFrame({ url = 'app.yoursaas.com', children, variant = 'light', dark = false, className = '' }) {
-  const v = dark ? 'dark' : variant;
+export function BrowserFrame({ url = 'app.yoursaas.com', children, variant = 'light', className = '' }) {
   const shell =
-    v === 'dark'
+    variant === 'dark'
       ? 'border-white/10 bg-slate-900'
-      : v === 'auto'
+      : variant === 'auto'
       ? 'border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900'
       : 'border-slate-200 bg-white';
   const bar =
-    v === 'dark'
+    variant === 'dark'
       ? 'border-white/10 bg-slate-900/80'
-      : v === 'auto'
+      : variant === 'auto'
       ? 'border-slate-100 bg-slate-50 dark:border-white/10 dark:bg-slate-900/80'
       : 'border-slate-100 bg-slate-50';
   const pill =
-    v === 'dark'
+    variant === 'dark'
       ? 'bg-white/5 text-slate-400'
-      : v === 'auto'
+      : variant === 'auto'
       ? 'bg-white text-slate-400 dark:bg-white/5'
       : 'bg-white text-slate-400';
   return (
@@ -146,35 +144,6 @@ export function MiniKanban() {
                 </div>
               ))}
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function MiniCalendar() {
-  const cells = Array.from({ length: 28 }, (_, i) => i + 1);
-  const marked = { 12: 'bg-brand-500', 17: 'bg-violet-500', 22: 'bg-sky-400' };
-  return (
-    <div className="w-[230px] rounded-xl bg-white p-3 ring-1 ring-slate-200">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-700">June</span>
-        <span className="text-[10px] text-slate-400">by due date</span>
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-          <div key={i} className="text-center text-[8px] font-medium text-slate-400">
-            {d}
-          </div>
-        ))}
-        {cells.map((n) => (
-          <div
-            key={n}
-            className="relative flex h-5 items-center justify-center rounded text-[9px] text-slate-500"
-          >
-            {n}
-            {marked[n] && <span className={`absolute bottom-0 h-1 w-1 rounded-full ${marked[n]}`} />}
           </div>
         ))}
       </div>

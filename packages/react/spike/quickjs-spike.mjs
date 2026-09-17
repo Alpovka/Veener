@@ -1,4 +1,4 @@
-import { newQuickJSWASMModuleFromVariant, shouldInterruptAfterDeadline, Scope } from 'quickjs-emscripten-core';
+import { newQuickJSWASMModuleFromVariant, Scope } from 'quickjs-emscripten-core';
 import releaseVariant from '@jitl/quickjs-wasmfile-release-sync';
 import { readFileSync } from 'node:fs';
 import { transform } from 'sucrase';

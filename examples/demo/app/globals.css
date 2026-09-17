@@ -52,16 +52,6 @@ html.dark body {
 }
 
 @layer components {
-  /* Gradient text */
-  .text-gradient {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(120deg, #c7d2fe 0%, #a78bfa 45%, #6366f1 100%);
-  }
-  .text-gradient-dark {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(120deg, #4338ca 0%, #7c3aed 60%, #4f46e5 100%);
-  }
-
   /* The animated aurora / gradient mesh used behind the hero + CTA */
   .aurora {
     background:
@@ -88,18 +78,6 @@ html.dark body {
     background-size: 48px 48px;
     -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, #000 50%, transparent 100%);
     mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, #000 50%, transparent 100%);
-  }
-
-  /* Glassy card */
-  .glass {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-  }
-  .glass-dark {
-    background: rgba(15, 23, 42, 0.55);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
   }
 
   /* 3D scene helpers */
