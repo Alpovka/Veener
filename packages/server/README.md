@@ -8,7 +8,7 @@ Commercial license: requires a Veneer license key. Prefer Veneer Cloud if you do
 self-host; both return the same `{ code, reply }` to `@veneer/react`.
 
 ```js
-import { createVeneerHandler, buildFrameResponse } from '@veneer/server';
+import { createVeneerHandler } from '@veneer/server';
 import { registry } from '../../veneer.config';
 
 export const POST = createVeneerHandler({
@@ -17,8 +17,13 @@ export const POST = createVeneerHandler({
   generate: ({ system, messages, signal }) => callYourModel(system, messages, { signal }),
   brand: { name: 'Acme', tone: 'calm, precise' },
 });
-export const GET = () => buildFrameResponse({ frameAncestors: "'self'" }); // at /veneer-frame
 ```
+
+That is the whole server side. The client's `VeneerCanvas` runs generated code in a Web Worker it
+loads from your own origin (`dist/veneer-worker.js`), so no other route is needed. The system
+prompt this package builds already describes the interpreter to the model: no browser globals, no
+links or images, Tailwind classes only. (`buildFrameResponse` is still exported for hosts on the
+legacy `VeneerFrame` iframe engine; it goes away with that engine.)
 
 ## Three ways to run it
 

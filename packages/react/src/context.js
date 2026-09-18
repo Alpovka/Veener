@@ -10,10 +10,12 @@ export const hashRegistry = hashRegistryShape;
  *  - actions:    the REAL implementations of those actions (functions the host app provides)
  *  - data:       the current live data for each registered data source
  *  - ui:         the current generated UI (a self-contained component, as a code string)
- *  - generation: bumps whenever the UI must be re-mounted in a FRESH sandbox document
- *  - violation:  the last security violation (frame navigated / unresponsive / failed the scan), if any
- *  - theme / resolvedMode / themePayload: the host brand (see theme.js) as validated tokens, the
- *                current light/dark mode, and the payload the frame receives
+ *  - generation: bumps whenever the UI must be re-mounted in a FRESH sandbox (a new worker for
+ *                VeneerCanvas; a new document for the legacy VeneerFrame)
+ *  - violation:  the last security violation (engine fatal / worker unresponsive / failed the scan), if any
+ *  - theme / resolvedMode / themeVars / themePayload: the host brand (see theme.js) as validated
+ *                tokens, the current light/dark mode, the `--veneer-*` variables per mode (set on the
+ *                canvas root), and the legacy frame payload
  *  - setUi / reset / flagViolation / restoreQuarantined
  *
  * Persistence (`persist` prop): 'local' (default) → localStorage; 'session' → sessionStorage;

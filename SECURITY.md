@@ -15,12 +15,18 @@ that was not registered.
 
 ## Scope
 
-In scope: `@veneer/react`, `@veneer/server` (including the bundled `packages/core` internals), the
-reference `@veneer/cloud`, and the sandbox document they serve.
+In scope: `@veneer/react` (the `VeneerCanvas` engine: the interpreter worker, the guest runtime,
+the allowlisted renderer and the bridge; and the legacy `VeneerFrame` engine while it ships),
+`@veneer/server` (including the bundled `packages/core` internals) and the reference `@veneer/cloud`.
+
+Especially interesting: anything that makes generated code reach a browser API from inside the
+interpreter, a rendered node that escapes the allowlist (a URL-loading element/attribute/style, a
+node painted outside the canvas), CSS that reaches the host page, or an action that runs without
+having been registered.
 
 Reports about the documented residual risks are welcome only when they show something new. The
-known limits are listed in the root README (self-navigation of a sandboxed frame, host CSP
-inheritance in `srcDoc` mode, CPU hot loops, UI spoofing inside the canvas) and in
+known limits are listed in the root README (UI spoofing inside the canvas, native allocation loops
+holding the worker until the heartbeat terminates it, `'wasm-unsafe-eval'` in the host CSP) and in
 `packages/react/README.md`.
 
 Licensing is a commercial control, not a security boundary. Bypassing the license check is a

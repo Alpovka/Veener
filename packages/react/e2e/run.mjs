@@ -1,8 +1,12 @@
 /**
- * Browser end-to-end checks for the sandbox, run in the preinstalled Chromium.
- *   node e2e/run.mjs
- * Serves a host page from a local server, routes the CDN scripts to node_modules (so the SRI
- * hashes are exercised against the real bytes), and drives attacks from inside the frame.
+ * Browser end-to-end checks, run in the preinstalled Chromium.
+ *   node e2e/run.mjs                 # everything
+ *   E2E_ONLY=canvas node e2e/run.mjs # the worker engine (VeneerCanvas) only
+ *   E2E_ONLY=frame  node e2e/run.mjs # the legacy iframe engine (VeneerFrame) only
+ * Canvas: serves a host page plus dist/veneer-worker.js, on a plain page and under a strict CSP,
+ * and drives the allowlist, the bridge, the interpreter's deadlines and the watchdog from the page.
+ * Frame (legacy): routes the CDN scripts to node_modules (so the SRI hashes are exercised against
+ * the real bytes) and drives attacks from inside the frame.
  */
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';

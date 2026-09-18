@@ -1,7 +1,7 @@
 // Compile-only check that the hand-written declarations describe a usable API.
 // Run with `npm run typecheck`; nothing here executes.
 // Only the two published packages are imported here: @veneer/core is internal and bundled.
-import { VeneerProvider, VeneerFrame, useVeneerGenerate, resolveTheme, type Registry } from '@veneer/react';
+import { VeneerProvider, VeneerCanvas, VeneerFrame, DEFAULT_WORKER_URL, useVeneerGenerate, resolveTheme, type Registry } from '@veneer/react';
 import { createVeneerHandler, buildFrameResponse, classifyIntent, verifyLicenseToken } from '@veneer/server';
 
 const registry: Registry = {
@@ -31,9 +31,18 @@ export function Example() {
     actions: { createTask: async (args) => ({ id: String(args.title) }) },
     data: { tasks: [] },
     theme: { mode: 'dark', colors: { primary: '#0f766e' } },
-    children: VeneerFrame({ frameSrc: '/veneer-frame', autoHeight: true, minHeight: 400 }),
+    children: VeneerCanvas({
+      workerUrl: DEFAULT_WORKER_URL,
+      minHeight: 400,
+      bleed: 200,
+      onLog: (level, text) => void [level, text],
+      onSecurityViolation: (v) => void v.reason,
+    }),
   });
 }
+
+// The legacy iframe engine stays typed while it ships.
+export const legacy = VeneerFrame({ frameSrc: '/veneer-frame', autoHeight: true, minHeight: 400 });
 
 const guess = classifyIntent('make it a kanban');
 const intent: 'design' | 'chat' | 'clarify' | 'unknown' = guess.intent;

@@ -2,7 +2,7 @@
   "name": "@veneer/core",
   "version": "0.3.0",
   "private": true,
-  "description": "Internal, not published: the framework-free pieces shared by @veneer/react and @veneer/server (registry validation, bridge argument checks, the static scanner, the sandbox document, the theme contract, license-token verification). Each published package bundles this at build time.",
+  "description": "Internal, not published: the framework-free pieces shared by @veneer/react and @veneer/server (registry validation, bridge argument checks, the static scanner, the theme contract, license-token verification, the legacy iframe document). Each published package bundles this at build time.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

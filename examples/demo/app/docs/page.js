@@ -18,7 +18,7 @@ const NAV = [
     items: [
       ['How it works', 'how-it-works'],
       ['The registry', 'registry'],
-      ['In-frame API', 'in-frame-api'],
+      ['The veneer API', 'veneer-api'],
     ],
   },
   {
@@ -248,7 +248,7 @@ export default function DocsPage() {
             </section>
 
             <section className="mt-12">
-              <H id="in-frame-api">In-frame API</H>
+              <H id="veneer-api">The veneer API (inside the interpreter)</H>
               <P>Generated code is plain JSX with these globals available (no imports):</P>
               <ul className="mt-4 space-y-2.5">
                 {[
