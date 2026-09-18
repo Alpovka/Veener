@@ -83,7 +83,7 @@ describe('handler intent gate', () => {
     const onError = vi.fn();
     const h = createVeneerHandler({ registry, generate, license: false, rateLimit: false, onError });
     const body = await (await h(req({ message: 'hey how are you' }))).json();
-    expect(body).toEqual({ code: null, intent: 'chat', reply: 'Hi! I am doing well. Want me to redesign something?' });
+    expect(body).toEqual({ code: null, intent: 'chat', mode: 'design', reply: 'Hi! I am doing well. Want me to redesign something?' });
     expect(onError).toHaveBeenCalled(); // dropped code is logged for prompt tuning
     const sent = generate.mock.calls[0][0];
     expect(sent.system).toContain('FIRST DECIDE THE USER\'S INTENT');
@@ -101,7 +101,7 @@ describe('handler intent gate', () => {
     const generate = vi.fn(async () => JSON.stringify({ intent: 'clarify', code: null, reply: 'Better in what way: layout, colours or density?' }));
     const h = createVeneerHandler({ registry, generate, license: false, rateLimit: false });
     const body = await (await h(req({ message: 'make it better' }))).json();
-    expect(body).toEqual({ code: null, intent: 'clarify', reply: 'Better in what way: layout, colours or density?' });
+    expect(body).toEqual({ code: null, intent: 'clarify', mode: 'design', reply: 'Better in what way: layout, colours or density?' });
   });
   it('still generates for a clear design request and scans it', async () => {
     const generate = vi.fn(async () => JSON.stringify({ intent: 'design', code: OK_CODE, reply: 'Here is your board.' }));

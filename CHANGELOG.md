@@ -18,6 +18,20 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
   and `worker-src 'self'`. `VeneerFrame` remains exported for one release.
 - The server prompt describes the interpreter (no `alert`/`confirm`/`prompt`, no links or images,
   arbitrary Tailwind values limited to lengths and hex colours).
+- **Edit mode (fast path for small changes).** When a message is a tweak to the current UI ("make
+  that button collapsible", "hide the footer"), the server asks the model for a few search/replace
+  `edits` against `currentUI` instead of the whole component — roughly 10× fewer output tokens.
+  Edits are applied on the server (whitespace-tolerant), scanned like generated code, get one repair
+  round if a search text does not match, and fall back to a full regeneration if that fails too.
+  `generate` receives `mode: 'edit' | 'design'` so hosts route edits to a fast model with thinking
+  off (the demo does: Gemini 2.5 Flash, `thinkingBudget: 0`); Veneer Cloud's Gemini adapter does
+  the same. Responses carry `mode` and `edited`; `editMode: false` on the handler disables it.
+  `classifyScope`, `applyEdits`, `buildEditPrompt`, `buildEditRepairPrompt` are exported.
+- **Warm spare worker.** `VeneerCanvas` keeps one extra engine worker booted in the background
+  while a UI is showing and the next UI adopts it, so a swap takes ~100–200 ms instead of the ~1 s
+  cold start (QuickJS + Tailwind). Still one fresh interpreter per UI. The previous UI's height is
+  held during the swap so the page does not jump. `warm={false}` disables it; `hasWarmWorker()` is
+  exported for diagnostics.
 - Demo: runs on `VeneerCanvas`; the `/veneer-frame` route is gone; a `prebuild` step copies the
   worker into `public/`.
 

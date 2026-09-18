@@ -67,6 +67,29 @@ export function classifyIntent(message, ctx = {}) {
   return { intent: 'unknown', confidence: 'low', reasons: ['no strong signal'] };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Scope: is this a small tweak to the current UI (edit mode: the model returns search/replace
+// edits, ~10× fewer output tokens) or a new view (design mode: the model returns the whole
+// component)? Edit mode is only ever an optimisation — a failed edit falls back to design mode —
+// so the classifier leans towards `design` whenever the message could mean a new layout.
+// ---------------------------------------------------------------------------------------------
+const NEW_VIEW = /\b(kanban|board|calendar|dashboard|timeline|gallery|chart|graph|table|grid view|list view|redesign|rebuild|recreate|from scratch|start over|new (layout|design|view|page|look)|whole (page|thing|ui|view)|entire|everything|completely|totally|different (layout|design|view)|instead of|convert|turn (it|this|the page) into|make (it|this|the page) (a|an|into)|switch to|reorganis|reorganiz|rearrange|group(ed)? by|sort(ed)? by|split into|two columns|three columns|side by side)\b/i;
+const TWEAK = /\b(collaps\w*|expand\w*|toggle|fold\w*|accordion|hide|show|reveal|rename|relabel|label|wording|text|copy|button|icon|emoji|color|colour|tint|border|outline|round\w*|shadow|padding|margin|spacing|gap|tighter|looser|font|bold\w*|italic|size|bigger|smaller|larger|wider|narrower|taller|shorter|align\w*|cent(er|re)\w*|tooltip|placeholder|hover|disable\w*|enable\w*|remove (the|that|this)|delete (the|that|this)|add (a|an|the|some)|move (the|that|this)|swap|reorder|dark(er)?|light(er)?|compact|dense|opacity|highlight\w*|badge|chip|tag|underline|uppercase|lowercase|capitali[sz]e|title|heading|header|footer|look|style|appearance|theme|card|cards|row|rows|column header|stat|counter|progress|bar|animation|transition)\b/i;
+
+/**
+ * @param {string} message
+ * @param {{ currentUI?: string, history?: Array }} [ctx]
+ * @returns {'edit'|'design'}
+ */
+export function classifyScope(message, ctx = {}) {
+  const m = String(message || '').trim();
+  if (!ctx.currentUI || !m) return 'design';
+  if (UNDO_REDO.test(m) || VAGUE_CHANGE.test(m)) return 'design';
+  if (m.split(/\s+/).length > 40) return 'design';
+  if (NEW_VIEW.test(m)) return 'design';
+  return TWEAK.test(m) ? 'edit' : 'design';
+}
+
 /**
  * Combine the model's label with the local read. Only `design` applies code.
  * @returns {'design'|'chat'|'clarify'}
