@@ -51,7 +51,8 @@ export default function PrivacyPage() {
 
       <Sec title="The live demo">
         <p>
-          The demo runs generated UI inside a sandboxed iframe with no network access. Your demo data
+          The demo runs generated UI inside a sandboxed JavaScript interpreter in your browser, with no
+          network access. Your demo data
           stays in your browser session and is not transmitted to us. Prompts you type into the “redesign
           with AI” chat are sent to the configured model provider to generate the requested interface.
         </p>

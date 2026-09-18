@@ -1,21 +1,23 @@
 /**
  * Theme contract: how a host brands the generated UI and the SDK's widgets.
  *
- * A theme is plain data. The provider resolves it against DEFAULT_THEME, turns it into CSS custom
- * properties (`--veneer-*`) for a light and a dark variant, and ships those into the sandbox over
- * the existing `init` / `theme` messages. Inside the frame the Tailwind runtime maps a fixed
- * vocabulary of brand utilities (THEME_UTILITIES) onto those variables, so generated code writes
- * `bg-primary text-primary-foreground rounded-md` and gets the host's brand.
+ * A theme is plain data. The provider resolves it against DEFAULT_THEME and turns it into CSS custom
+ * properties (`--veneer-*`) for a light and a dark variant. VeneerCanvas sets the current mode's
+ * variables inline on the canvas root, and the Tailwind stylesheet compiled in the engine worker
+ * maps a fixed vocabulary of brand utilities (THEME_UTILITIES) onto them, so generated code writes
+ * `bg-primary text-primary-foreground rounded-md` and gets the host's brand. (The legacy iframe
+ * engine receives the same variables over its `init` / `theme` messages.)
  *
- * Every value is validated here before it crosses into the frame: colours must be CSS colours,
- * lengths must be lengths, font stacks and shadows may not contain `url(`, `;`, `{` or `}`.
- * A theme can therefore never inject CSS or load a remote resource.
+ * Every value is validated here before it is used as CSS: colours must be CSS colours, lengths
+ * must be lengths, font stacks and shadows may not contain `url(`, `;`, `{` or `}`. A theme can
+ * therefore never inject CSS or load a remote resource.
  *
- * Fonts travel as data URIs (the frame's CSP allows `font-src data:` and nothing else), fetched
- * once by the host with `loadThemeFonts`.
+ * `fonts` (data-URI loading via `loadThemeFonts`) exists for the legacy iframe engine, whose CSP
+ * allows `font-src data:` and nothing else. VeneerCanvas renders in the host page, so the page's
+ * own fonts apply and nothing needs to be inlined.
  */
 
-/** Brand utility classes generated code may use. Shared by the system prompt and the frame. */
+/** Brand utility classes generated code may use. Shared by the system prompt and both engines. */
 export const THEME_UTILITIES = {
   surfaces: ['bg-background', 'bg-surface', 'bg-primary', 'bg-accent', 'bg-success', 'bg-warning', 'bg-danger'],
   text: ['text-foreground', 'text-muted', 'text-primary', 'text-primary-foreground', 'text-accent', 'text-success', 'text-warning', 'text-danger'],
@@ -225,8 +227,8 @@ function toBase64(bytes) {
 }
 
 /**
- * Fetch the theme's font files and return them as data URIs the frame can use.
- * Failures are reported through `onError` and skipped; the frame keeps its fallback stack.
+ * LEGACY (iframe engine): fetch the theme's font files and return them as data URIs the frame can
+ * use. Failures are reported through `onError` and skipped; the frame keeps its fallback stack.
  * @returns {Promise<Array<{ family, weight, style, format, dataUri }>>}
  */
 export async function loadThemeFonts(fonts, { fetch: fetchImpl, maxBytes = 2 * 1024 * 1024, onError } = {}) {
@@ -256,7 +258,7 @@ export async function loadThemeFonts(fonts, { fetch: fetchImpl, maxBytes = 2 * 1
   return out;
 }
 
-/** The payload that crosses into the frame. `fonts` are the loaded data-URI entries. */
+/** LEGACY (iframe engine): the payload that crosses into the frame. `fonts` are the loaded data-URI entries. */
 export function themePayload(resolved, mode, fonts) {
   return {
     vars: resolved.vars,

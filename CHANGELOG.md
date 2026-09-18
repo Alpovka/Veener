@@ -64,8 +64,8 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
   declarations; `transpilePackages` is no longer needed. `@veneer/react` has no runtime
   dependencies besides React. All packages declare `engines.node >= 20`; MIT `LICENSE` files
   where applicable.
-- Demo: security headers (CSP, HSTS, nosniff, referrer and permissions policies) on every page
-  except the sandbox document; canonical site URL from `NEXT_PUBLIC_SITE_URL`; the API route
+- Demo: security headers (CSP, HSTS, nosniff, referrer and permissions policies) on every page;
+  canonical site URL from `NEXT_PUBLIC_SITE_URL`; the API route
   declares `maxDuration = 60`; the chat requires a license unless
   `NEXT_PUBLIC_VENEER_REQUIRE_LICENSE=false`.
 - CI: unit tests, type check, Chromium e2e, demo build and `npm pack` dry runs on every PR.

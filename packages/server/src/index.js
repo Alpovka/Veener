@@ -1,6 +1,7 @@
 /**
- * @veneer/server — the host-side generator endpoint and the frame document, for any runtime
- * that speaks the Fetch API (Next.js route handlers, Remix, Hono, Bun, Deno, Node 20+).
+ * @veneer/server — the host-side generator endpoint, for any runtime that speaks the Fetch API
+ * (Next.js route handlers, Remix, Hono, Bun, Deno, Node 20+). Also serves the legacy iframe
+ * engine's document (`buildFrameResponse`) for hosts still on <VeneerFrame>.
  *
  * The SERVER owns the registry. The client sends only { message, history, currentUI }; whatever
  * else it sends is ignored. This is what stops the endpoint from being a general-purpose LLM
@@ -254,6 +255,7 @@ export function createVeneerHandler(opts) {
 export const DEFAULT_CLOUD_API = 'https://api.veneer.dev';
 
 /**
+ * LEGACY (iframe engine only; <VeneerCanvas> needs no route — it loads `dist/veneer-worker.js`).
  * Serve the sandbox document from a URL (pass its path as `frameSrc` to <VeneerFrame>). Unlike a
  * srcdoc frame, this document does NOT inherit the host page's CSP, and the policy is delivered
  * as a header (so it can also carry `sandbox` and `frame-ancestors`). Serve it from a separate

@@ -1,8 +1,10 @@
 /**
  * The parent-side bridge.
  *
- * This is the ONLY path between generated code (running in a sandboxed, opaque-origin iframe,
- * reached over a dedicated MessageChannel — see VeneerFrame.js) and the host application.
+ * This is the ONLY path between generated code and the host application. Generated code runs in
+ * a QuickJS interpreter inside a Web Worker (see packages/react/src/engine) — or, on the legacy
+ * engine, in an opaque-origin iframe reached over a MessageChannel — and every `veneer.action`
+ * call it makes arrives here as plain JSON.
  *
  * Every action request is validated here:
  *   1. the action id must be registered;
@@ -10,7 +12,7 @@
  *      keys present, lenient type checks derived from the `type` text, no prototype-polluting
  *      keys, bounded size and depth) — or pass the action's own `validate(args)` hook;
  *   3. only then does the real implementation run;
- *   4. its return value crosses back into the frame ONLY if the definition declares `returns`.
+ *   4. its return value crosses back into the sandbox ONLY if the definition declares `returns`.
  *
  * Data flows the other way through `pickRegisteredData`, so unregistered keys of the host's
  * `data` object never reach generated code.
@@ -170,7 +172,7 @@ export async function runBridgeAction({ registry, actions, action, args, validat
   return filterActionResult(def, result);
 }
 
-/** Only declared return values cross into the frame; otherwise the generated code sees undefined. */
+/** Only declared return values cross into the sandbox; otherwise the generated code sees undefined. */
 export function filterActionResult(def, result) {
   return def && def.returns ? result : undefined;
 }
