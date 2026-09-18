@@ -12,13 +12,21 @@ export interface ChatTurn {
   content: string;
 }
 
+export type GenerationMode = 'edit' | 'design';
+
 export interface GenerateRequest {
   system: string;
   messages: ChatTurn[];
   signal?: AbortSignal;
+  /**
+   * 'edit': a small tweak to the current UI; the model answers with a few search/replace edits
+   * (a few hundred output tokens). Route these to a fast model with thinking off for near-instant
+   * changes. 'design': a whole view.
+   */
+  mode: GenerationMode;
 }
 
-/** Your LLM call. Return the raw model text (JSON with { code, reply, intent } is expected). */
+/** Your LLM call. Return the raw model text (JSON with { code | edits, reply, intent } is expected). */
 export type GenerateFn = (req: GenerateRequest) => Promise<string> | string;
 
 export interface Brand {
@@ -64,15 +72,19 @@ export interface HandlerOptions {
   maxHistoryTurnChars?: number;
   maxCurrentUIChars?: number;
   maxRepairRounds?: number;
+  /** Maximum search/replace edits accepted in one edit-mode response. Default 30. */
+  maxEdits?: number;
+  /** Request small tweaks as search/replace edits against the current UI (default true). `false` always regenerates the whole view. */
+  editMode?: boolean;
   fetch?: typeof fetch;
 }
 
 export const DEFAULT_HANDLER_OPTIONS: Required<
-  Pick<HandlerOptions, 'maxBodyBytes' | 'timeoutMs' | 'allowedOrigins' | 'allowMissingFetchMetadata' | 'rateLimit' | 'maxHistory' | 'maxMessageChars' | 'maxHistoryTurnChars' | 'maxCurrentUIChars' | 'maxRepairRounds'>
+  Pick<HandlerOptions, 'maxBodyBytes' | 'timeoutMs' | 'allowedOrigins' | 'allowMissingFetchMetadata' | 'rateLimit' | 'maxHistory' | 'maxMessageChars' | 'maxHistoryTurnChars' | 'maxCurrentUIChars' | 'maxRepairRounds' | 'maxEdits' | 'editMode'>
 >;
 export const DEFAULT_CLOUD_API: string;
 export const DEFAULT_LICENSE_API: string;
-export const GENERATION_LIMITS: { maxHistory: number; maxMessageChars: number; maxHistoryTurnChars: number; maxCurrentUIChars: number; maxRepairRounds: number };
+export const GENERATION_LIMITS: { maxHistory: number; maxMessageChars: number; maxHistoryTurnChars: number; maxCurrentUIChars: number; maxRepairRounds: number; maxEdits: number };
 
 /** Returns a Fetch-API handler: `(request: Request) => Promise<Response>`. */
 export function createVeneerHandler(opts: HandlerOptions): (request: Request) => Promise<Response>;
@@ -88,8 +100,19 @@ export interface GenerationResult {
   code: string | null;
   intent: Intent;
   reply: string;
-  blocked?: boolean;
+  /** How the request was made: 'edit' (search/replace against the current UI) or 'design' (whole view). */
+  mode: GenerationMode;
+  /** True when `code` is the current UI with the model's edits applied. */
+  edited?: boolean;
+  blocked?: string[];
   repaired?: boolean;
+}
+
+export interface CodeEdit {
+  /** Text copied verbatim from the current UI; must occur exactly once. */
+  search: string;
+  /** Replacement text ('' deletes). */
+  replace: string;
 }
 
 export function runGeneration(params: {
@@ -102,13 +125,21 @@ export function runGeneration(params: {
   signal?: AbortSignal;
   maxCurrentUIChars?: number;
   maxRepairRounds?: number;
+  maxEdits?: number;
+  editMode?: boolean;
   log?: (err: unknown, ctx: Record<string, unknown>) => void;
 }): Promise<GenerationResult>;
 export function scanGeneratedCode(code: string, registry: Registry): string[];
 export function buildSystemPrompt(registry: Registry, opts?: { brand?: Brand }): string;
 export function buildUserPrompt(message: string, currentUI: string, heuristic?: IntentGuess): string;
+export function buildEditPrompt(message: string, currentUI: string, heuristic?: IntentGuess): string;
 export function buildRepairPrompt(violations: string[]): string;
-export function extractJson(text: string): { code?: unknown; reply?: unknown; intent?: unknown } | null;
+export function buildEditRepairPrompt(error: string): string;
+/** Apply search/replace edits to code; whitespace-tolerant when a search does not match verbatim. */
+export function applyEdits(code: string, edits: CodeEdit[], opts?: { maxEdits?: number }): { ok: true; code: string } | { ok: false; error: string };
+/** Local read of whether a message is a small tweak to the current UI ('edit') or a new view ('design'). */
+export function classifyScope(message: string, ctx?: { currentUI?: string; history?: ChatTurn[] }): GenerationMode;
+export function extractJson(text: string): { code?: unknown; edits?: unknown; reply?: unknown; intent?: unknown } | null;
 export function sanitizeHistory(history: unknown, opts?: { maxHistory?: number; maxHistoryTurnChars?: number }): ChatTurn[];
 
 export interface IntentGuess {

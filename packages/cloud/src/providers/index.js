@@ -32,7 +32,9 @@ export function createProvider({ provider, key, model, fetch: fetchImpl }) {
   }
 
   if (provider === 'gemini') {
-    return async ({ system, messages, signal }) => {
+    return async ({ system, messages, signal, mode }) => {
+      // Edit mode answers with a few search/replace edits: short output, thinking off → fast.
+      const edit = mode === 'edit';
       const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
@@ -40,7 +42,12 @@ export function createProvider({ provider, key, model, fetch: fetchImpl }) {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: messages.map((x) => ({ role: x.role === 'assistant' ? 'model' : 'user', parts: [{ text: x.content }] })),
-          generationConfig: { temperature: 0.4, maxOutputTokens: 12000, responseMimeType: 'application/json' },
+          generationConfig: {
+            temperature: edit ? 0.2 : 0.4,
+            maxOutputTokens: edit ? 4000 : 12000,
+            responseMimeType: 'application/json',
+            ...(edit && /^gemini-2\.5/.test(m) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          },
         }),
       });
       const data = await readJson(res, 'gemini');

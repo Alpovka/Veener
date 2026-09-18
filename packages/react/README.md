@@ -61,13 +61,20 @@ export default function Page({ userId }) {
   your React. Every action from generated code is validated against the registry before your
   function runs. Props: `workerUrl`, `minHeight`, `className`/`style` (applied to the canvas root),
   `onError`, `onLog` (generated code's `console`), `onSecurityViolation`, `actionTimeoutMs`,
-  `heartbeatMs`/`maxMissedHeartbeats`, `bleed` (how far popovers may hang below the canvas).
+  `heartbeatMs`/`maxMissedHeartbeats`, `bleed` (how far popovers may hang below the canvas),
+  `warm` (default true: keep one spare worker booted so the next UI swaps in ~100–200 ms instead
+  of a ~1 s cold start; the previous height is held during the swap so the page does not jump).
 - **`useVeneerGenerate()`** is headless: `generate(message)` posts `{ message, history,
   currentUI }` to your endpoint (default `/api/veneer`) and swaps in the returned code. Build any
   chat box, command palette or button on top. The registry is never sent; the server owns it.
 
+Small requests are fast: the server classifies "make that button collapsible" as an **edit** and
+asks the model for a few search/replace edits against the current UI instead of a whole new
+component, so tweaks land in a second or two while new layouts take the full generation. Each
+history turn carries `mode: 'edit' | 'design'` if your chat UI wants to show it.
+
 The endpoint is `createVeneerHandler` from `@veneer/server` (self-hosted, license key) or
-Veneer Cloud (hosted, API key). Both return `{ code, intent, reply, token }`: `code` is `null`
+Veneer Cloud (hosted, API key). Both return `{ code, intent, reply, mode, token }`: `code` is `null`
 for chat turns, clarifying questions and refusals, and `token` is the signed license token the hook
 verifies before applying code (chat turns carry none and need none). Pass
 `requireLicense: false` to the hook to skip the check, e.g. in tests. On a runtime without

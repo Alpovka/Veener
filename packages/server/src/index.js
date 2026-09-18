@@ -13,7 +13,7 @@ import { buildFrameHtml, FRAME_CSP, FRAME_SANDBOX, hashRegistryShape } from '@ve
 import { runGeneration, sanitizeHistory, GENERATION_LIMITS } from './generation.js';
 import { createLicenseClient, createDevLicenseClient, LicenseError } from './license.js';
 
-export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS, classifyIntent, resolveIntent, INTENTS } from './generation.js';
+export { scanGeneratedCode, buildSystemPrompt, buildUserPrompt, buildEditPrompt, buildEditRepairPrompt, applyEdits, extractJson, runGeneration, buildRepairPrompt, sanitizeHistory, GENERATION_LIMITS, classifyIntent, classifyScope, resolveIntent, INTENTS } from './generation.js';
 export { createLicenseClient, LicenseError, DEFAULT_LICENSE_API } from './license.js';
 // Shared helpers hosts may need server-side (the core workspace is bundled, not published).
 export { hashRegistryShape, verifyLicenseToken, LICENSE_PUBLIC_KEYS, FRAME_CSP, FRAME_SANDBOX } from '@veneer/core';
@@ -25,6 +25,8 @@ export const DEFAULT_HANDLER_OPTIONS = {
   allowedOrigins: [],
   allowMissingFetchMetadata: true,
   rateLimit: { limit: 20, windowMs: 60000 },
+  /** Small tweaks to the current UI are requested as search/replace edits (faster); `false` always regenerates. */
+  editMode: true,
 };
 
 function json(body, status = 200, extra = {}) {
@@ -101,7 +103,10 @@ export function checkRequestOrigin(request, { allowedOrigins = [], allowMissingF
  *
  * @param {object} opts
  * @param {object} opts.registry   the SAME registry object the client passes to <VeneerProvider>
- * @param {(input: { system: string, messages: {role:'user'|'assistant', content:string}[], signal: AbortSignal }) => Promise<string>} [opts.generate]
+ * @param {(input: { system: string, messages: {role:'user'|'assistant', content:string}[], signal: AbortSignal, mode: 'edit'|'design' }) => Promise<string>} [opts.generate]
+ *   `mode` is 'edit' for small tweaks (a few hundred output tokens: route these to a fast model with
+ *   thinking off) and 'design' for whole views.
+ * @param {boolean} [opts.editMode]  default true
  * @param {string} [opts.licenseKey]
  * @param {false} [opts.license]   pass false for local development without a key
  * @param {{ apiKey: string, apiBase?: string, llm: { provider: 'gemini'|'openai'|'anthropic', key: string, model?: string } }} [opts.cloud]
@@ -223,12 +228,12 @@ export function createVeneerHandler(opts) {
             log(new Error(`cloud error: ${res.status}`), { stage: 'cloud', code: out && out.code });
             return json({ error: 'The design service failed. Please try again.' }, 502, cors);
           }
-          return json({ code: typeof out.code === 'string' ? out.code : null, intent: ['design', 'chat', 'clarify'].includes(out.intent) ? out.intent : out.code ? 'design' : 'chat', reply: typeof out.reply === 'string' ? out.reply : '', blocked: out.blocked, repaired: out.repaired, token: out.token, remaining: out.remaining }, 200, cors);
+          return json({ code: typeof out.code === 'string' ? out.code : null, intent: ['design', 'chat', 'clarify'].includes(out.intent) ? out.intent : out.code ? 'design' : 'chat', reply: typeof out.reply === 'string' ? out.reply : '', mode: out.mode === 'edit' ? 'edit' : 'design', edited: !!out.edited, blocked: out.blocked, repaired: out.repaired, token: out.token, remaining: out.remaining }, 200, cors);
         }
 
         // Self-hosted: run the pipeline, then license the result. Only design turns that produced
         // code count against the license; chat replies, clarifications and refusals are free.
-        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, log });
+        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, maxEdits: o.maxEdits, editMode: o.editMode !== false, log });
         if (result.code == null) return json(result, 200, cors);
         let lic;
         try {

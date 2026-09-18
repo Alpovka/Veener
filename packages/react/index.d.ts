@@ -121,6 +121,11 @@ export interface VeneerCanvasProps {
   minHeight?: number;
   /** How far (px) generated UI may hang below the canvas before it is clipped. Default 280. */
   bleed?: number;
+  /**
+   * Keep one spare engine worker booted in the background (QuickJS + Tailwind ready), so the next
+   * generated UI swaps in without the ~1 s cold start. Default true. Costs one idle worker.
+   */
+  warm?: boolean;
 }
 
 /**
@@ -131,16 +136,20 @@ export function VeneerCanvas(props: VeneerCanvasProps): ReactElement | null;
 
 export type Intent = 'design' | 'chat' | 'clarify';
 
+/** 'edit': the server applied a few search/replace edits to the current UI (fast path); 'design': a whole new view. */
+export type GenerationMode = 'edit' | 'design';
+
 export interface HistoryTurn {
   role: 'user' | 'assistant';
   content: string;
   changed?: boolean;
   intent?: Intent;
+  mode?: GenerationMode;
   error?: boolean;
 }
 
 export type GenerateOutcome =
-  | { ok: true; changed: boolean; intent: Intent; reply: string; blocked?: boolean }
+  | { ok: true; changed: boolean; intent: Intent; mode: GenerationMode; reply: string; blocked?: string[] }
   | { ok: false; error: string; code?: string; reason?: string };
 
 export interface UseVeneerGenerateOptions {

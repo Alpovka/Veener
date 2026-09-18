@@ -84,8 +84,11 @@ export function useVeneerGenerate({ endpoint = '/api/veneer', headers, fetch: fe
           const intent = json.intent === 'chat' || json.intent === 'clarify' || json.intent === 'design' ? json.intent : changed ? 'design' : 'chat';
           const fallback = changed ? 'Done.' : intent === 'clarify' ? 'Could you tell me more?' : 'No changes made.';
           const reply = typeof json.reply === 'string' && json.reply ? json.reply : fallback;
-          setHistory((h) => [...h, { role: 'assistant', content: reply, changed, intent }]);
-          outcome = { ok: true, changed, intent, reply, blocked: json.blocked };
+          // 'edit': the server applied a few search/replace edits to the current UI (the fast path);
+          // 'design': a whole new view. Purely informational for chat UIs.
+          const mode = json.mode === 'edit' ? 'edit' : 'design';
+          setHistory((h) => [...h, { role: 'assistant', content: reply, changed, intent, mode }]);
+          outcome = { ok: true, changed, intent, mode, reply, blocked: json.blocked };
         }
       } catch (e) {
         const msg = e && e.name === 'AbortError' ? 'Cancelled.' : 'Network error. Please try again.';

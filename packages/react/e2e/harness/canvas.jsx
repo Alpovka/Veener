@@ -2,7 +2,9 @@
 // <VeneerCanvas> (no iframe). Generated UI lands in THIS document, so tests query the page DOM.
 import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { VeneerProvider, VeneerCanvas, useVeneer } from '../../src/index.js';
+import { VeneerProvider, VeneerCanvas, useVeneer, hasWarmWorker } from '../../src/index.js';
+
+window.__veneerWarm = () => hasWarmWorker();
 
 const registry = {
   dataSources: [{ id: 'tasks', description: 'Tasks', fields: [{ name: 'id', type: 'string' }, { name: 'title', type: 'string' }] }],

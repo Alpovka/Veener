@@ -476,6 +476,34 @@ if (ONLY !== 'frame') for (const variant of ['/canvas', '/canvas-strict']) {
   await context.close();
 }
 
+// Warm spare worker: after the first UI is up, a second worker is booted in the background and the
+// next UI adopts it, so the swap skips the cold start (QuickJS wasm + Tailwind ≈ 1 s).
+if (ONLY !== 'frame') {
+  const { context, page } = await newPage();
+  await page.goto(`${base}/canvas`);
+  try {
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    await page.waitForFunction(() => window.__veneerWarm && window.__veneerWarm(), null, { timeout: 5000 }).catch(() => {});
+    // Playwright registers a new Worker asynchronously; give it a moment to show up.
+    for (let i = 0; i < 50 && page.workers().length < 2; i++) await page.waitForTimeout(100);
+    const workersBefore = page.workers().length;
+    check('[canvas warm] a spare worker is booted while a UI is showing', (await page.evaluate(() => window.__veneerWarm())) === true && workersBefore === 2, `workers=${workersBefore}`);
+    const heightBefore = await page.evaluate(() => document.querySelector('[data-veneer-engine="worker"]').getBoundingClientRect().height);
+    const t0 = Date.now();
+    await page.evaluate(() => window.__veneer.setUi("render(<div id='swap' className='p-4'>swapped</div>)"));
+    await page.locator('#v-swap').waitFor({ timeout: 10000 });
+    const swapMs = Date.now() - t0;
+    check('[canvas warm] the next UI adopts the spare and renders fast', swapMs < 1500, `${swapMs}ms`);
+    check('[canvas warm] the old height is held during the swap (no page jump)', heightBefore > 0, `${heightBefore}px held`);
+    await page.waitForFunction(() => window.__veneerWarm(), null, { timeout: 5000 }).catch(() => {});
+    for (let i = 0; i < 50 && page.workers().length !== 2; i++) await page.waitForTimeout(100);
+    check('[canvas warm] a new spare is booted after the swap (old worker gone)', (await page.evaluate(() => window.__veneerWarm())) === true && page.workers().length === 2, `workers=${page.workers().length}`);
+  } catch (e) {
+    check('[canvas warm] scenario threw', false, e.message.split('\n')[0]);
+  }
+  await context.close();
+}
+
 // Dark mode: the `.veneer-dark` class on the canvas root drives the `dark:` variant.
 if (ONLY !== 'frame') {
   const { context, page } = await newPage();

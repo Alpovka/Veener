@@ -53,6 +53,37 @@ greeting), the code is dropped and logged via `onError` so prompts can be tuned.
 `intent`; `useVeneerGenerate` exposes it per history turn as `intent` and `changed`, so a chat UI
 can show "Canvas updated" only when something changed.
 
+## Edit mode: small changes are fast
+
+Every request is classified as **design** (a new view; the model returns the whole component) or
+**edit** (a tweak to the current UI — "make the add button collapsible", "hide the footer", "rounder
+cards"; the model returns a few `{ search, replace }` edits against `currentUI`). Edits are a few
+hundred output tokens instead of a few thousand, so they come back several times faster. The handler
+applies them (tolerating re-indentation), scans the result exactly like generated code, gives the
+model one repair round if a search text does not match, and falls back to a full regeneration if
+that fails too — the canvas never sees a half-applied change.
+
+Your `generate` callback receives `mode`. Route edits to a fast configuration:
+
+```js
+generate: async ({ system, messages, signal, mode }) => {
+  const edit = mode === 'edit';
+  const res = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: toGemini(messages),
+    config: { systemInstruction: system, responseMimeType: 'application/json', abortSignal: signal,
+              maxOutputTokens: edit ? 4000 : 12000,
+              ...(edit ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
+  });
+  return res.text;
+}
+```
+
+Responses carry `mode: 'edit' | 'design'` and `edited: true` when the code is the current UI plus
+the model's edits. `editMode: false` turns the fast path off (everything regenerates), `maxEdits`
+caps the number of edits accepted (default 30). `classifyScope(message, { currentUI })` and
+`applyEdits(code, edits)` are exported for tests and custom pipelines.
+
 ## Verify → repair
 
 Generated code is parsed and checked against the registry before it is returned. A fixable

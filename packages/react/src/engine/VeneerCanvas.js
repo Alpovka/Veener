@@ -7,6 +7,51 @@ import { sanitizeTag, sanitizeAttrs, sanitizeClass, sanitizeStyle, EVENT_PROP, i
 
 export const DEFAULT_WORKER_URL = '/veneer-worker.js';
 
+// ---------------------------------------------------------------------------------------------
+// Warm spare workers. Booting a worker (QuickJS wasm + the Tailwind compiler) costs ~1 s cold. The
+// canvas keeps ONE spare per worker URL booted in the background while a UI is showing, so the
+// next generation swaps in almost immediately. A spare is still a fresh interpreter that has never
+// seen any generated code: the one-fresh-worker-per-UI rule is unchanged, it just boots early.
+// Messages the spare sends before it is adopted (`ready`, a boot failure) are buffered and replayed.
+// ---------------------------------------------------------------------------------------------
+const spares = new Map(); // workerUrl → { worker, buffer, failed }
+
+function warmSpare(workerUrl) {
+  if (typeof Worker === 'undefined' || spares.has(workerUrl)) return;
+  let worker;
+  try {
+    worker = new Worker(workerUrl, { name: 'veneer-engine' });
+  } catch (e) {
+    return;
+  }
+  const spare = { worker, buffer: [], failed: false };
+  worker.onmessage = (ev) => spare.buffer.push(ev.data);
+  worker.onerror = () => {
+    spare.failed = true;
+  };
+  spares.set(workerUrl, spare);
+}
+
+function takeSpare(workerUrl) {
+  const spare = spares.get(workerUrl);
+  if (!spare) return null;
+  spares.delete(workerUrl);
+  if (spare.failed) {
+    try {
+      spare.worker.terminate();
+    } catch (e) {
+      /* ignore */
+    }
+    return null;
+  }
+  return spare;
+}
+
+/** Test/diagnostic hook: is a spare worker currently warm for this URL? */
+export function hasWarmWorker(workerUrl = DEFAULT_WORKER_URL) {
+  return spares.has(workerUrl);
+}
+
 /**
  * The worker engine's canvas. Generated code runs inside a QuickJS interpreter in a Web Worker
  * and only ever sends back a description of what to draw; this component redraws that description
@@ -29,10 +74,13 @@ export const DEFAULT_WORKER_URL = '/veneer-worker.js';
  */
 export function VeneerCanvas(props) {
   const { generation, loaded } = useVeneer();
+  // The last rendered height survives the swap to a new instance, so the page does not collapse
+  // and jump while the next UI boots.
+  const heightRef = useRef(0);
   if (!loaded) {
     return <div className={props.className} style={Object.assign({ minHeight: props.minHeight || 120 }, props.style)} aria-busy="true" />;
   }
-  return <CanvasInstance key={generation} {...props} />;
+  return <CanvasInstance key={generation} {...props} heightRef={heightRef} />;
 }
 
 function CanvasInstance({
@@ -51,6 +99,9 @@ function CanvasInstance({
   minHeight = 120,
   /** How far generated UI (dropdowns, popovers) may hang below the canvas before it is clipped. */
   bleed = 280,
+  /** Keep a spare worker booted for the next UI (default true). */
+  warm = true,
+  heightRef,
 }) {
   const ctx = useVeneer();
   const { ui, registry, actions, data, flagViolation, themeVars, resolvedMode, violation } = ctx;
@@ -77,8 +128,18 @@ function CanvasInstance({
       limiter: createRateLimiter(rateLimit || {}),
       sheet: null,
       styleEl: null,
+      warmed: false,
     };
   }
+  // Once this UI is up, boot the spare for the next one (off the critical path of first paint).
+  const scheduleWarm = useCallback(() => {
+    const s = st.current;
+    if (!warm || s.warmed) return;
+    s.warmed = true;
+    setTimeout(() => {
+      if (!s.dead) warmSpare(workerUrl);
+    }, 150);
+  }, [warm, workerUrl]);
   const latest = useRef({ ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation });
   useLayoutEffect(() => {
     latest.current = { ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation };
@@ -245,8 +306,10 @@ function CanvasInstance({
         if (typeof d.css === 'string') installCss(d.css);
         setStarted(true);
         setVersion((v) => v + 1);
+        scheduleWarm();
       } else if (d.type === 'started') {
         setStarted(true);
+        scheduleWarm();
       } else if (d.type === 'action') {
         const callId = d.callId;
         const reply = (ok, payload) => post(ok ? { type: 'action-result', callId, ok: true, result: payload } : { type: 'action-result', callId, ok: false, error: payload });
@@ -279,7 +342,7 @@ function CanvasInstance({
         violate('engine-fatal', { reason: d.reason, message: String(d.message || '') });
       }
     },
-    [post, report, violate, installCss, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, validation]
+    [post, report, violate, installCss, scheduleWarm, actionTimeoutMs, heartbeatMs, maxMissedHeartbeats, validation]
   );
   const onMessageRef = useRef(onMessage);
   useLayoutEffect(() => {
@@ -294,12 +357,16 @@ function CanvasInstance({
       report({ type: 'runtime-timeout', message: 'Web Workers are not available in this environment.' });
       return undefined;
     }
-    let worker;
-    try {
-      worker = new Worker(workerUrl, { name: 'veneer-engine' });
-    } catch (e) {
-      report({ type: 'runtime-timeout', message: `Could not start the Veneer engine worker from ${workerUrl}: ${String((e && e.message) || e)}` });
-      return undefined;
+    // Adopt the warm spare if there is one (already booted, or about to be); otherwise cold start.
+    const spare = warm ? takeSpare(workerUrl) : null;
+    let worker = spare ? spare.worker : null;
+    if (!worker) {
+      try {
+        worker = new Worker(workerUrl, { name: 'veneer-engine' });
+      } catch (e) {
+        report({ type: 'runtime-timeout', message: `Could not start the Veneer engine worker from ${workerUrl}: ${String((e && e.message) || e)}` });
+        return undefined;
+      }
     }
     s.worker = worker;
     worker.onmessage = (ev) => onMessageRef.current(ev);
@@ -307,6 +374,7 @@ function CanvasInstance({
       report({ type: s.ready ? 'engine-error' : 'runtime-timeout', message: (ev && ev.message) || `The Veneer engine worker failed to load from ${workerUrl}.` });
       if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
     };
+    if (spare) for (const data of spare.buffer) onMessageRef.current({ data });
     s.readyTimer = setTimeout(() => {
       if (!s.ready && !s.dead) {
         report({
@@ -316,7 +384,14 @@ function CanvasInstance({
       }
     }, readyTimeoutMs);
     return undefined;
-  }, [workerUrl, readyTimeoutMs, report]);
+  }, [workerUrl, readyTimeoutMs, report, warm]);
+
+  // Remember the rendered height for the next instance (see VeneerCanvas).
+  useEffect(() => {
+    if (!started || !rootRef.current || !heightRef) return;
+    const h = rootRef.current.getBoundingClientRect().height;
+    if (h > 0) heightRef.current = h;
+  }, [version, started, heightRef]);
 
   // Real unmount (not StrictMode's simulated one): tear the worker down.
   const mountedAgain = useRef(false);
@@ -376,13 +451,15 @@ function CanvasInstance({
   );
 
   const vars = (themeVars && themeVars[resolvedMode]) || {};
+  // Until this UI has drawn, hold the previous UI's height so the swap does not move the page.
+  const heldHeight = started ? minHeight : Math.max(Number(minHeight) || 0, (heightRef && heightRef.current) || 0);
   const rootStyle = Object.assign(
     {
       position: 'relative',
       isolation: 'isolate',
       contain: 'layout',
       clipPath: `inset(-16px -16px -${Math.max(0, Number(bleed) || 0)}px -16px)`,
-      minHeight,
+      minHeight: heldHeight,
       color: 'var(--veneer-foreground)',
       fontFamily: 'var(--veneer-font-sans)',
       fontSize: 'var(--veneer-font-size)',
@@ -395,7 +472,7 @@ function CanvasInstance({
   if (dead) {
     const stayingDown = violation && violation.remounted === false;
     return (
-      <div className={className} role="status" style={Object.assign({ minHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui', fontSize: 13 }, style)}>
+      <div className={className} role="status" style={Object.assign({ minHeight: heldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'ui-sans-serif, system-ui', fontSize: 13 }, style)}>
         {stayingDown ? 'This view was stopped for safety. Reset the canvas to continue.' : 'This view was stopped for safety and is being reset.'}
       </div>
     );
