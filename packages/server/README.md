@@ -79,10 +79,20 @@ generate: async ({ system, messages, signal, mode }) => {
 }
 ```
 
-Responses carry `mode: 'edit' | 'design'` and `edited: true` when the code is the current UI plus
-the model's edits. `editMode: false` turns the fast path off (everything regenerates), `maxEdits`
-caps the number of edits accepted (default 30). `classifyScope(message, { currentUI })` and
-`applyEdits(code, edits)` are exported for tests and custom pipelines.
+Responses carry `mode: 'edit' | 'design'`, `edited: true` when the code is the current UI plus
+the model's edits, and `fallback: true` when edits could not be applied and the view was
+regenerated instead (watch that rate). Matching is three-tiered — verbatim, per-line trimmed, then
+whitespace-collapsed with quote style normalised — so re-spaced JSX or `'`→`"` still applies.
+`editMode: false` turns the fast path off (everything regenerates), `maxEdits` caps the number of
+edits accepted (default 30). `classifyScope(message, { currentUI })` and `applyEdits(code, edits)`
+are exported for tests and custom pipelines.
+
+## Images and links
+
+By default the prompt tells the model there are no images and no links (the client renderer drops
+them). If the host opts in on the client (`<VeneerProvider allow={{ images, links }}>`), pass the
+same object here — `createVeneerHandler({ allow })` — and the prompt describes exactly which
+sources are allowed, so the model uses them and nothing else.
 
 ## Verify → repair
 

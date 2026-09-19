@@ -42,7 +42,7 @@ describe('classifyScope', () => {
     expect(classifyScope('make the button smaller', {})).toBe('design');
     expect(classifyScope('undo', ctx)).toBe('design');
     expect(classifyScope('make it better', ctx)).toBe('design');
-    expect(classifyScope(Array(45).fill('smaller').join(' '), ctx)).toBe('design');
+    expect(classifyScope(Array(30).fill('smaller').join(' '), ctx)).toBe('design');
   });
 });
 

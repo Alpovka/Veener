@@ -61,8 +61,9 @@ export function sanitizeHistory(history, { maxHistory = GENERATION_LIMITS.maxHis
  * @param {(err: Error, ctx: object) => void} [p.log]
  * @returns {Promise<{ code: string|null, intent: 'design'|'chat'|'clarify', reply: string, mode: 'edit'|'design', edited?: boolean, blocked?: string[], repaired?: boolean }>}
  */
-export async function runGeneration({ registry, generate, message, history = [], currentUI = '', brand, signal, maxCurrentUIChars = GENERATION_LIMITS.maxCurrentUIChars, maxRepairRounds = GENERATION_LIMITS.maxRepairRounds, maxEdits = GENERATION_LIMITS.maxEdits, editMode = true, log = () => {} }) {
-  const system = buildSystemPrompt(registry, { brand });
+export async function runGeneration({ registry, generate, message, history = [], currentUI = '', brand, allow, signal, maxCurrentUIChars = GENERATION_LIMITS.maxCurrentUIChars, maxRepairRounds = GENERATION_LIMITS.maxRepairRounds, maxEdits = GENERATION_LIMITS.maxEdits, editMode = true, log = () => {} }) {
+  const system = buildSystemPrompt(registry, { brand, allow });
+  let fallback = false;
   const ids = registryIds(registry);
   const heuristic = classifyIntent(message, { history });
   let mode = editMode ? classifyScope(message, { currentUI, history }) : 'design';
@@ -114,6 +115,7 @@ export async function runGeneration({ registry, generate, message, history = [],
     else {
       // Fall back to a full generation: slower, but never a broken canvas.
       mode = 'design';
+      fallback = true;
       messages = [...history, { role: 'user', content: buildUserPrompt(message, currentUI, heuristic) }];
       raw = await generate({ system, messages, signal, mode });
       parsed = extractJson(typeof raw === 'string' ? raw : '');
@@ -153,7 +155,7 @@ export async function runGeneration({ registry, generate, message, history = [],
     log(new Error('generated code failed the scan'), { violations: result.violations });
     return { code: null, intent, mode, reply: friendlyScanReply(result.violations, registry), blocked: result.violations };
   }
-  return { code, intent, reply, mode, edited, repaired };
+  return { code, intent, reply, mode, edited, repaired, ...(fallback ? { fallback: true } : {}) };
 }
 
 /**
@@ -176,10 +178,11 @@ export function applyEdits(code, edits, { maxEdits = GENERATION_LIMITS.maxEdits 
     if (idx !== -1) {
       if (out.indexOf(search, idx + 1) !== -1) return { ok: false, error: `edit ${n}: the "search" text appears more than once in the current code; include more surrounding lines so it matches exactly one place` };
     } else {
-      const loose = findLoose(out, search);
-      if (!loose.found) return { ok: false, error: `edit ${n}: the "search" text was not found in the current code${loose.ambiguous ? ' (matched more than once ignoring indentation)' : ''}; copy it character for character from the current code` };
-      idx = loose.index;
-      len = loose.length;
+      let m = findLoose(out, search);
+      if (!m.found && !m.ambiguous) m = findNormalized(out, search);
+      if (!m.found) return { ok: false, error: `edit ${n}: the "search" text was not found in the current code${m.ambiguous ? ' (matched more than once ignoring whitespace)' : ''}; copy it character for character from the current code` };
+      idx = m.index;
+      len = m.length;
     }
     out = out.slice(0, idx) + replace + out.slice(idx + len);
   }
@@ -221,6 +224,49 @@ function findLoose(code, search) {
   const lastLine = lines[hit + want.length - 1];
   const end = starts[hit + want.length - 1] + lastLine.trimEnd().length;
   return { found: true, index, length: end - index };
+}
+
+/**
+ * Third tier: compare with every whitespace run collapsed to one space and `'`/`` ` `` normalised to
+ * `"`, mapping the match back to the original span. Catches the model re-spacing a JSX line or
+ * switching quote style, which the line-based match does not.
+ */
+function normalizeWithMap(s) {
+  // Whitespace is kept (as one space) only where it separates two word characters — `a b` — and
+  // dropped next to punctuation, so `{ () => x }` and `{() => x}` normalise identically.
+  const chars = [];
+  const map = [];
+  const isWord = (ch) => /[A-Za-z0-9_$]/.test(ch);
+  for (let i = 0; i < s.length; i++) {
+    let ch = s[i];
+    if (/\s/.test(ch)) {
+      let j = i + 1;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      const prev = chars.length ? chars[chars.length - 1] : '';
+      const next = j < s.length ? s[j] : '';
+      if (prev && next && isWord(prev) && isWord(next)) {
+        chars.push(' ');
+        map.push(i);
+      }
+      i = j - 1;
+      continue;
+    }
+    if (ch === "'" || ch === '`') ch = '"';
+    chars.push(ch);
+    map.push(i);
+  }
+  return { text: chars.join(''), map };
+}
+function findNormalized(code, search) {
+  const c = normalizeWithMap(code);
+  const needle = normalizeWithMap(search).text.trim();
+  if (needle.length < 8) return { found: false }; // too short to be trusted loosely
+  const first = c.text.indexOf(needle);
+  if (first === -1) return { found: false };
+  if (c.text.indexOf(needle, first + 1) !== -1) return { found: false, ambiguous: true };
+  const start = c.map[first];
+  const end = c.map[first + needle.length - 1] + 1;
+  return { found: true, index: start, length: end - start };
 }
 
 export function buildEditRepairPrompt(error) {
@@ -276,12 +322,21 @@ ${violations.map((v) => '- ' + v).join('\n')}
 Fix ONLY these problems, keep everything else the same, and respond again with ONLY the JSON object { "code", "reply" }.`;
 }
 
-export function buildSystemPrompt(registry, { brand } = {}) {
+export function buildSystemPrompt(registry, { brand, allow } = {}) {
   const reg = JSON.stringify(registry || {}, null, 2);
   const u = THEME_UTILITIES;
   const brandLine = brand && (brand.name || brand.tone)
     ? `\nThe host brand${brand.name ? ` is "${String(brand.name).slice(0, 80)}"` : ''}${brand.tone ? `; its tone is ${String(brand.tone).slice(0, 200)}` : ''}.`
     : '';
+  // What the host lets the renderer load. Default: nothing — the allowlist drops <img> and demotes <a>.
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).slice(0, 20) : []);
+  const images = list(allow && allow.images);
+  const links = list(allow && allow.links);
+  const describe = (rules) => rules.map((r) => (r === 'same-origin' ? 'this app\'s own origin (relative URLs)' : r === 'https:' ? 'any https URL' : r === 'data:' ? 'inline data: URIs' : `URLs starting with ${r}`)).join('; ');
+  const mediaRules = [
+    images.length ? `- <img src alt> IS allowed, but ONLY from: ${describe(images)}. Always set alt. Other image URLs are dropped by the renderer.` : `- No images: <img>, <video>, <picture> and background images are removed by the renderer. Use inline SVG icons.`,
+    links.length ? `- <a href> IS allowed, but ONLY to: ${describe(links)}. Other links are shown as plain text. Cross-origin links open in a new tab.` : `- No links: <a href> is shown as plain text by the renderer. Use buttons and actions instead.`,
+  ].join('\n');
   return `You are Veneer, an assistant embedded in a host web application. You can redesign the current page
 on request, and you can simply talk: answer questions about the design, give your opinion, explain
 what you can do, or respond to a greeting.
@@ -324,10 +379,11 @@ THE CODE YOU WRITE:
   limited to plain lengths and hex colours (w-[320px], text-[#334155]); never url(...), var(...) or calc(...).
   Make it polished, modern, and visually distinct — good spacing, rounded corners, subtle shadows, clear hierarchy.
 - MUST NOT use window, document, location, navigator, fetch, XMLHttpRequest, WebSocket, cookies,
-  localStorage, alert/confirm/prompt, \`this\`, classes, dangerouslySetInnerHTML, <a href> links, <img>,
-  <video>, <iframe>, url() in inline styles, or any external URL/script. Code that does is rejected before
-  it runs, and the renderer drops links and images anyway — use buttons, text and inline SVG icons instead.
+  localStorage, alert/confirm/prompt, \`this\`, classes, dangerouslySetInnerHTML, <iframe>, <script>,
+  url() in inline styles, or any external script. Code that does is rejected before it runs. Elements
+  cannot be measured (getBoundingClientRect is 0) and there is no scrolling API; lay out with CSS.
   Forms may use onSubmit (call e.preventDefault()) but never navigate.
+${mediaRules}
 - Handle edge cases: lists may be empty, nullable fields (see the types) may be null, dates are strings.
 
 CAPABILITY RULES (this is the contract — follow it exactly):

@@ -101,7 +101,45 @@ globalThis.crypto = {
 globalThis.alert = (m) => glue.log('warn', 'alert() is not available: ' + String(m));
 globalThis.confirm = () => false;
 globalThis.prompt = () => null;
-globalThis.navigator = { language: 'en-US', languages: ['en-US'], userAgent: 'Veneer' };
+globalThis.navigator = { language: 'en-US', languages: ['en-US'], userAgent: 'Veneer', onLine: true, clipboard: { writeText: () => Promise.resolve(), readText: () => Promise.resolve('') } };
+// Browser APIs AI-written components reach for without needing them to do anything: observers
+// never fire, media queries never match, idle callbacks run as timers. Present so code does not
+// crash on `new ResizeObserver(...)`; inert so nothing can be measured or observed.
+class InertObserver {
+  constructor(cb) {
+    this._cb = cb;
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+globalThis.ResizeObserver = InertObserver;
+globalThis.IntersectionObserver = InertObserver;
+globalThis.MutationObserver = InertObserver;
+globalThis.matchMedia = (q) => ({ matches: false, media: String(q || ''), onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false });
+globalThis.requestIdleCallback = (fn) => setTimeoutShim(() => fn({ didTimeout: false, timeRemaining: () => 50 }), 1);
+globalThis.cancelIdleCallback = clearTimeoutShim;
+globalThis.getComputedStyle = (el) => ({ getPropertyValue: (p) => (el && el.style && typeof el.style.getPropertyValue === 'function' ? el.style.getPropertyValue(p) : ''), ...((el && el._styleStore) || {}) });
+globalThis.Event = class Event {
+  constructor(type, init) {
+    this.type = String(type);
+    this.bubbles = !!(init && init.bubbles);
+    this.defaultPrevented = false;
+  }
+  preventDefault() {
+    this.defaultPrevented = true;
+  }
+  stopPropagation() {}
+};
+globalThis.CustomEvent = class CustomEvent extends globalThis.Event {
+  constructor(type, init) {
+    super(type, init);
+    this.detail = init ? init.detail : undefined;
+  }
+};
 
 // Minimal Intl: enough for the formatting AI code reaches for. Not locale-aware beyond en-US.
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -516,11 +554,49 @@ class MiniElement extends MiniNode {
     return '';
   }
   focus() {
+    document.activeElement = this;
     ops.push({ t: 'focus', id: this.id });
   }
-  blur() {}
-  click() {}
+  blur() {
+    if (document.activeElement === this) document.activeElement = null;
+  }
+  click() {
+    const fn = this._guestHandlers.click;
+    if (fn) fn.call(this, makeEvent(this, 'click', {}));
+  }
   scrollIntoView() {}
+  scrollTo() {}
+  scrollBy() {}
+  select() {}
+  setSelectionRange() {}
+  matches() {
+    return false;
+  }
+  closest() {
+    return null;
+  }
+  getAttributeNames() {
+    return Object.keys(this.attributes);
+  }
+  dispatchEvent(ev) {
+    const fn = ev && this._guestHandlers[normEvent(ev.type)];
+    if (fn) fn.call(this, ev);
+    return true;
+  }
+  get scrollTop() {
+    return 0;
+  }
+  set scrollTop(_v) {}
+  get scrollLeft() {
+    return 0;
+  }
+  set scrollLeft(_v) {}
+  get scrollHeight() {
+    return 0;
+  }
+  get scrollWidth() {
+    return 0;
+  }
   getBoundingClientRect() {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
   }
@@ -583,11 +659,72 @@ const document = {
 };
 const root = new MiniElement('#root');
 globalThis.document = document;
+// `instanceof` checks in AI-written code (`el instanceof HTMLElement`) resolve against the MiniDOM.
+globalThis.Node = MiniNode;
+globalThis.Element = MiniElement;
+globalThis.HTMLElement = MiniElement;
+globalThis.HTMLInputElement = MiniElement;
+globalThis.SVGElement = MiniElement;
+globalThis.Text = MiniText;
 
 // Preact scheduling on top of the glue timers; rendering is debounced to a microtask so it happens
 // inside the same VM entry that caused it and the worker flushes one batch of ops.
 options.requestAnimationFrame = (cb) => setTimeoutShim(cb, 0);
 options.debounceRendering = (cb) => Promise.resolve().then(cb);
+
+// ---------------------------------------------------------------------------------------------
+// State carry-over. Every new UI runs in a fresh interpreter, which would throw away whatever the
+// user was doing (half-typed text, an expanded row) on every small edit. So `useState` is wrapped:
+// each call gets a stable key — component name, vnode key, hook index — and records its latest
+// value. Before the old interpreter is terminated the host asks for a snapshot of those values,
+// and hands it to the next one, whose `useState` uses the carried value as the initial value when
+// the key exists and the type matches. An edit that changes hook order simply falls back to the
+// code's own initial values for the shifted hooks. Only JSON-safe values travel.
+// ---------------------------------------------------------------------------------------------
+let restoreMap = {};
+const liveState = new Map();
+let curName = '';
+let curKey = '';
+let hookIdx = 0;
+const prevBeforeRender = options.__r;
+options.__r = (vnode) => {
+  if (prevBeforeRender) prevBeforeRender(vnode);
+  const t = vnode && vnode.type;
+  curName = (t && (t.displayName || t.name)) || 'anon';
+  curKey = vnode && vnode.key != null ? '@' + String(vnode.key) : '';
+  hookIdx = 0;
+};
+function useStateCarried(init) {
+  const key = curName + curKey + '#' + hookIdx++;
+  // React semantics: a lazy initialiser runs exactly once, on mount. Running it here (instead of
+  // inside useState) costs nothing extra and lets the carried value be type-checked against it.
+  const base = typeof init === 'function' ? init() : init;
+  let initial = base;
+  if (Object.prototype.hasOwnProperty.call(restoreMap, key)) {
+    const carried = restoreMap[key];
+    if (base === undefined || base === null || carried === null || typeof carried === typeof base) initial = carried;
+  }
+  const pair = useState(() => initial);
+  liveState.set(key, pair[0]);
+  return pair;
+}
+function snapshotState() {
+  const out = {};
+  let size = 0;
+  for (const [k, v] of liveState) {
+    if (v === undefined || typeof v === 'function' || typeof v === 'symbol') continue;
+    try {
+      const s = JSON.stringify(v);
+      if (s === undefined) continue;
+      size += s.length;
+      if (size > 200000) break;
+      out[k] = JSON.parse(s);
+    } catch (e) {
+      /* cyclic or unserialisable: skip */
+    }
+  }
+  return JSON.stringify(out);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Event dispatch (host → guest). The host sends a plain JSON payload; we build a synthetic event.
@@ -760,7 +897,7 @@ const React = {
   Fragment,
   Component,
   createContext,
-  useState,
+  useState: useStateCarried,
   useEffect,
   useMemo,
   useCallback,
@@ -793,6 +930,11 @@ define(
       dataIds = Array.isArray(c.dataIds) ? c.dataIds.map(String) : [];
       actionTimeoutMs = Number(c.actionTimeoutMs) || 30000;
       dataCache = c.data && typeof c.data === 'object' ? c.data : {};
+      restoreMap = c.restore && typeof c.restore === 'object' && !Array.isArray(c.restore) ? c.restore : {};
+    },
+    /** JSON of every live `useState` value, keyed for the next interpreter (see useStateCarried). */
+    snapshot() {
+      return snapshotState();
     },
     setData(json) {
       dataCache = JSON.parse(json) || {};

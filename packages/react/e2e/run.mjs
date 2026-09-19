@@ -47,6 +47,9 @@ const hostJs = bundle.outputFiles[0].text;
 const workerFile = resolve(root, 'dist/veneer-worker.js');
 if (!existsSync(workerFile)) execFileSync(process.execPath, [resolve(root, 'build.mjs')], { stdio: 'inherit' });
 const workerJs = readFileSync(workerFile, 'utf8');
+const workerWasm = readFileSync(resolve(root, 'dist/veneer-worker.wasm'));
+// 1×1 transparent PNG for the image-allowlist scenario.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const canvasBundle = await build({
   entryPoints: [resolve(here, 'harness/canvas.jsx')],
   bundle: true,
@@ -58,7 +61,8 @@ const canvasBundle = await build({
 });
 const canvasJs = canvasBundle.outputFiles[0].text;
 // No 'unsafe-inline' anywhere and no 'unsafe-eval': only wasm compilation, in a same-origin worker.
-const CANVAS_STRICT_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; connect-src 'none'; img-src 'none'; font-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+// connect-src 'self' is what fetches the .wasm next to the worker.
+const CANVAS_STRICT_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'none'; font-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
 const steals = [];
 const server = http.createServer(async (req, res) => {
@@ -85,6 +89,12 @@ const server = http.createServer(async (req, res) => {
   } else if (url.pathname === '/veneer-worker.js') {
     res.writeHead(200, { 'content-type': 'text/javascript' });
     res.end(workerJs);
+  } else if (url.pathname === '/veneer-worker.wasm') {
+    res.writeHead(200, { 'content-type': 'application/wasm' });
+    res.end(workerWasm);
+  } else if (url.pathname === '/img/ok.png') {
+    res.writeHead(200, { 'content-type': 'image/png' });
+    res.end(PNG);
   } else if (url.pathname === '/veneer-frame') {
     const r = buildFrameResponse({ frameAncestors: "'self'" });
     res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -500,6 +510,66 @@ if (ONLY !== 'frame') {
     check('[canvas warm] a new spare is booted after the swap (old worker gone)', (await page.evaluate(() => window.__veneerWarm())) === true && page.workers().length === 2, `workers=${page.workers().length}`);
   } catch (e) {
     check('[canvas warm] scenario threw', false, e.message.split('\n')[0]);
+  }
+  await context.close();
+}
+
+// State carry-over: an edit keeps what the user was doing; a new view starts clean.
+if (ONLY !== 'frame') {
+  const { context, page } = await newPage();
+  await page.goto(`${base}/canvas`);
+  try {
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    await page.locator('#v-add').click();
+    await page.locator('#v-count').filter({ hasText: '2' }).waitFor({ timeout: 5000 });
+    // Type last, so the title field is the focused element when the swap happens.
+    await page.locator('#v-title').fill('hello there');
+    await page.locator('#v-echo').filter({ hasText: 'hello there' }).waitFor({ timeout: 5000 });
+    check('[canvas carry] badge marks the area as AI-generated', (await page.locator('.veneer-badge').textContent()) === 'AI-generated view');
+    // A small edit of the same UI (only markup changed), applied as the server would: carryState.
+    await page.evaluate(() => window.__veneer.setUi(window.__veneer.defaultUI.replace('>brand<', '>brand!<'), { carryState: true }));
+    await page.locator('#v-brand').filter({ hasText: 'brand!' }).waitFor({ timeout: 20000 });
+    await page.waitForTimeout(150);
+    const after = await page.evaluate(() => ({ echo: document.getElementById('v-echo').textContent, value: document.getElementById('v-title').value, focused: document.activeElement && document.activeElement.id, last: document.getElementById('v-last').textContent }));
+    check('[canvas carry] typed text survives an edit (useState carried into the new interpreter)', after.echo === 'hello there' && after.value === 'hello there', JSON.stringify(after));
+    check('[canvas carry] focus returns to the same field after the swap', after.focused === 'v-title', String(after.focused));
+    check('[canvas carry] other component state survives too', /^t[a-z0-9]+$/.test(after.last || ''), after.last);
+    // A new view (no carryState) starts from the code's own initial values.
+    await page.evaluate(() => window.__veneer.setUi(window.__veneer.defaultUI.replace('>brand<', '>fresh<')));
+    await page.locator('#v-brand').filter({ hasText: 'fresh' }).waitFor({ timeout: 20000 });
+    const fresh = await page.evaluate(() => ({ echo: document.getElementById('v-echo').textContent, value: document.getElementById('v-title').value }));
+    check('[canvas carry] a new view does not inherit state', fresh.echo === '' && fresh.value === '', JSON.stringify(fresh));
+  } catch (e) {
+    check('[canvas carry] scenario threw', false, e.message.split('\n')[0]);
+  }
+  await context.close();
+}
+
+// Host allow policy: images and links only from listed sources, with safe attributes.
+if (ONLY !== 'frame') {
+  const { context, page } = await newPage();
+  await page.goto(`${base}/canvas?allow=1`);
+  try {
+    await page.locator('#v-count').waitFor({ timeout: 20000 });
+    const probe = await page.evaluate(() => {
+      const img = document.getElementById('v-okimg');
+      const bad = document.getElementById('v-img');
+      const ok = document.getElementById('v-oklink');
+      const link = document.getElementById('v-link');
+      return {
+        img: img ? { tag: img.tagName, src: img.getAttribute('src'), loading: img.getAttribute('loading'), ref: img.getAttribute('referrerpolicy'), alt: img.getAttribute('alt') } : null,
+        bad: !!bad,
+        ok: ok ? { tag: ok.tagName, href: ok.getAttribute('href'), target: ok.getAttribute('target'), rel: ok.getAttribute('rel') } : null,
+        link: link ? { tag: link.tagName, href: link.getAttribute('href') } : null,
+      };
+    });
+    check('[canvas allow] same-origin image is rendered lazily with no referrer', probe.img && probe.img.tag === 'IMG' && /\/img\/ok\.png$/.test(probe.img.src) && probe.img.loading === 'lazy' && probe.img.ref === 'no-referrer' && probe.img.alt === 'ok', JSON.stringify(probe.img));
+    check('[canvas allow] an image from a non-allowed path is still dropped', probe.bad === false);
+    check('[canvas allow] allowed cross-origin link opens in a new tab with noopener', probe.ok && probe.ok.tag === 'A' && probe.ok.href === 'https://example.com/x' && probe.ok.target === '_blank' && /noopener/.test(probe.ok.rel), JSON.stringify(probe.ok));
+    check('[canvas allow] a link to a non-allowed destination is still demoted', probe.link && probe.link.tag === 'SPAN' && probe.link.href === null, JSON.stringify(probe.link));
+    check('[canvas allow] nothing was fetched from the network besides the allowed image', steals.length === 0, `steals=${steals.length}`);
+  } catch (e) {
+    check('[canvas allow] scenario threw', false, e.message.split('\n')[0]);
   }
   await context.close();
 }

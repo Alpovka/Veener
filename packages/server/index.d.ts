@@ -76,6 +76,12 @@ export interface HandlerOptions {
   maxEdits?: number;
   /** Request small tweaks as search/replace edits against the current UI (default true). `false` always regenerates the whole view. */
   editMode?: boolean;
+  /**
+   * Image/link URL prefixes generated UI may use — pass the same object as the client's
+   * `<VeneerCanvas allow>` / `<VeneerProvider allow>`, so the model is told what it may use.
+   * Keywords: 'same-origin', 'https:', and (images) 'data:'. Default: none.
+   */
+  allow?: { images?: string[]; links?: string[] };
   fetch?: typeof fetch;
 }
 
@@ -104,6 +110,8 @@ export interface GenerationResult {
   mode: GenerationMode;
   /** True when `code` is the current UI with the model's edits applied. */
   edited?: boolean;
+  /** True when an edit request could not be applied and the view was regenerated instead. */
+  fallback?: boolean;
   blocked?: string[];
   repaired?: boolean;
 }
@@ -122,6 +130,7 @@ export function runGeneration(params: {
   history?: ChatTurn[];
   currentUI?: string;
   brand?: Brand;
+  allow?: { images?: string[]; links?: string[] };
   signal?: AbortSignal;
   maxCurrentUIChars?: number;
   maxRepairRounds?: number;
@@ -130,7 +139,7 @@ export function runGeneration(params: {
   log?: (err: unknown, ctx: Record<string, unknown>) => void;
 }): Promise<GenerationResult>;
 export function scanGeneratedCode(code: string, registry: Registry): string[];
-export function buildSystemPrompt(registry: Registry, opts?: { brand?: Brand }): string;
+export function buildSystemPrompt(registry: Registry, opts?: { brand?: Brand; allow?: { images?: string[]; links?: string[] } }): string;
 export function buildUserPrompt(message: string, currentUI: string, heuristic?: IntentGuess): string;
 export function buildEditPrompt(message: string, currentUI: string, heuristic?: IntentGuess): string;
 export function buildRepairPrompt(violations: string[]): string;

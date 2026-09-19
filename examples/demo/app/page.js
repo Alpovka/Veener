@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { VeneerProvider, VeneerCanvas } from '@veneer/react';
 import { VeneerChat } from './_components/VeneerChat';
 import { VeneerLogo } from './_components/VeneerLogo';
-import { registry, initialTasks, defaultUI, theme as brandTheme } from './veneer.config';
+import { registry, initialTasks, defaultUI, theme as brandTheme, allow } from './veneer.config';
 import { useTheme } from './_components/theme';
 import {
   Reveal,
@@ -84,6 +84,7 @@ export default function Home() {
       defaultUI={defaultUI}
       persist="memory"
       theme={veneerTheme}
+      allow={allow}
       onThemeError={(e) => console.warn('[veneer] theme:', e)}
       onSecurityViolation={(v) => console.warn('[veneer] sandbox violation:', v.reason, v)}
     >

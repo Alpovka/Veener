@@ -24,6 +24,19 @@ export const LIMITS = {
   maxOpsPerFlush: 20000,
 };
 
+/** Host-tunable subset of LIMITS, clamped so a host can loosen the deadlines for heavy views but never remove them. */
+export function mergeLimits(overrides) {
+  const o = overrides && typeof overrides === 'object' ? overrides : {};
+  const clamp = (v, min, max, dflt) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Number(v))) : dflt);
+  return {
+    ...LIMITS,
+    entryMs: clamp(o.entryMs, 50, 2000, LIMITS.entryMs),
+    initialEvalMs: clamp(o.initialEvalMs, 500, 10000, LIMITS.initialEvalMs),
+    memoryBytes: clamp(o.memoryMB != null ? Number(o.memoryMB) * 1024 * 1024 : undefined, 16 * 1024 * 1024, 256 * 1024 * 1024, LIMITS.memoryBytes),
+    maxOpsPerFlush: clamp(o.maxOpsPerFlush, 1000, 100000, LIMITS.maxOpsPerFlush),
+  };
+}
+
 /** JSX (and the odd TS-free modern syntax) → plain JS, classic runtime against `React.createElement`. */
 export function compileGenerated(code) {
   return (
@@ -231,6 +244,12 @@ export function createBox(QuickJS, guestSource, io, limits = LIMITS) {
     },
     fallback(message) {
       return entry(limits.entryMs, () => rt('fallback', String(message || '')));
+    },
+    /** Live `useState` values as a JSON string, for carrying into the next box. Returns { state } or { error }. */
+    snapshot() {
+      const r = entry(limits.entryMs, () => rt('snapshot'));
+      if (r.error) return { error: r.error };
+      return { state: typeof r.value === 'string' ? r.value : '{}' };
     },
     /** Pull the recorded ops. Returns { root, ops } or { error }. */
     flush() {

@@ -70,6 +70,11 @@ export const theme = {
   ],
 };
 
+// What generated UI may load. Images and links are off by default in the SDK; the demo allows
+// same-origin images (its CSP has img-src 'self' data:) and same-origin links. Passed to BOTH the
+// provider (the renderer enforces it) and the server handler (the model is told about it).
+export const allow = { images: ['same-origin', 'data:'], links: ['same-origin'] };
+
 export const initialTasks = [
   { id: 't1', title: 'Draft the investor update', status: 'doing', dueDate: '2026-06-18' },
   { id: 't2', title: 'Review pull requests', status: 'todo', dueDate: '2026-06-17' },

@@ -107,6 +107,8 @@ export function checkRequestOrigin(request, { allowedOrigins = [], allowMissingF
  *   `mode` is 'edit' for small tweaks (a few hundred output tokens: route these to a fast model with
  *   thinking off) and 'design' for whole views.
  * @param {boolean} [opts.editMode]  default true
+ * @param {{ images?: string[], links?: string[] }} [opts.allow]  the same image/link policy the
+ *   client's <VeneerCanvas allow> uses, so the model is told what it may use (default: none)
  * @param {string} [opts.licenseKey]
  * @param {false} [opts.license]   pass false for local development without a key
  * @param {{ apiKey: string, apiBase?: string, llm: { provider: 'gemini'|'openai'|'anthropic', key: string, model?: string } }} [opts.cloud]
@@ -202,7 +204,7 @@ export function createVeneerHandler(opts) {
           const res = await fetchImpl(`${(o.cloud.apiBase || DEFAULT_CLOUD_API).replace(/\/$/, '')}/v1/generate`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', authorization: `Bearer ${o.cloud.apiKey}` },
-            body: JSON.stringify({ registry, brand: o.brand, message, history, currentUI, llm: o.cloud.llm }),
+            body: JSON.stringify({ registry, brand: o.brand, allow: o.allow, message, history, currentUI, llm: o.cloud.llm }),
             signal: controller.signal,
           });
           let out = null;
@@ -233,7 +235,7 @@ export function createVeneerHandler(opts) {
 
         // Self-hosted: run the pipeline, then license the result. Only design turns that produced
         // code count against the license; chat replies, clarifications and refusals are free.
-        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, maxEdits: o.maxEdits, editMode: o.editMode !== false, log });
+        const result = await runGeneration({ registry, generate: o.generate, message, history, currentUI, brand: o.brand, allow: o.allow, signal: controller.signal, maxCurrentUIChars: o.maxCurrentUIChars, maxRepairRounds: o.maxRepairRounds, maxEdits: o.maxEdits, editMode: o.editMode !== false, log });
         if (result.code == null) return json(result, 200, cors);
         let lic;
         try {

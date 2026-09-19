@@ -42,7 +42,28 @@ export interface VeneerProviderProps {
   onSecurityViolation?: (violation: SecurityViolation) => void;
   theme?: PartialTheme;
   onThemeError?: (e: { type: string; [k: string]: unknown }) => void;
+  /** What generated UI may load: image and link URL prefixes. Default none (images dropped, links demoted to text). */
+  allow?: AllowPolicy;
   children?: ReactNode;
+}
+
+/**
+ * URL prefixes (`https://cdn.example.com/`) or the keywords `'same-origin'`, `'https:'` (any https
+ * URL) and, for images only, `'data:'` (inline base64 images). Cross-origin links open in a new
+ * tab with `rel="noopener noreferrer nofollow"`; images load lazily with no referrer.
+ */
+export interface AllowPolicy {
+  images?: string[];
+  links?: string[];
+}
+
+export interface EngineError {
+  kind: 'render' | 'runtime' | 'compile' | string;
+  stage?: string;
+  message: string;
+  /** The generated code that was running. */
+  code?: string;
+  at: number;
 }
 
 export interface VeneerContextValue {
@@ -50,15 +71,21 @@ export interface VeneerContextValue {
   actions: ActionImplementations;
   data: Record<string, unknown> | undefined;
   ui: string;
-  setUi(code: string): void;
+  /** `carryState: true` keeps the previous interpreter's component state across the swap (used for edits and undo). */
+  setUi(code: string, opts?: { carryState?: boolean }): void;
   reset(): void;
   loaded: boolean;
   defaultUI: string;
   generation: number;
+  carryState: boolean;
   violation: SecurityViolation | null;
   flagViolation(info: Partial<SecurityViolation>): void;
   restoreQuarantined(): boolean;
   clearViolation(): void;
+  /** Last crash the engine reported for the current UI; cleared by setUi/reset. */
+  engineError: EngineError | null;
+  reportEngineError(err: Omit<EngineError, 'at'>): void;
+  allow: AllowPolicy | null;
   storageKey: string;
   theme: Theme;
   themeVars: { light: Record<string, string>; dark: Record<string, string> };
@@ -126,7 +153,23 @@ export interface VeneerCanvasProps {
    * generated UI swaps in without the ~1 s cold start. Default true. Costs one idle worker.
    */
   warm?: boolean;
+  /** Image/link URL prefixes the renderer may load; overrides the provider's `allow`. Default none. */
+  allow?: AllowPolicy;
+  /**
+   * Interpreter limits for heavy views, clamped in the worker: `entryMs` (per event/timer, 50–2000,
+   * default 250), `initialEvalMs` (500–10000, default 2000), `memoryMB` (16–256, default 64),
+   * `maxOpsPerFlush` (1000–100000, default 20000).
+   */
+  limits?: { entryMs?: number; initialEvalMs?: number; memoryMB?: number; maxOpsPerFlush?: number };
+  /**
+   * Persistent marker that the area is AI-generated, drawn above anything generated code can paint
+   * (spoofing defence). A string (default 'AI-generated view'), a React node, or `false` to hide.
+   */
+  badge?: ReactNode | false;
 }
+
+/** Diagnostic: is a spare engine worker currently booted for this URL? */
+export function hasWarmWorker(workerUrl?: string): boolean;
 
 /**
  * The worker engine: generated code runs in a QuickJS interpreter inside a Web Worker and only
@@ -146,6 +189,10 @@ export interface HistoryTurn {
   intent?: Intent;
   mode?: GenerationMode;
   error?: boolean;
+  /** Internal turn (the automatic runtime-repair request); do not render it. */
+  hidden?: boolean;
+  /** The assistant turn that answered a runtime-repair request. */
+  repair?: boolean;
 }
 
 export type GenerateOutcome =
@@ -160,6 +207,8 @@ export interface UseVeneerGenerateOptions {
   /** Default true. Only responses that carry code need a token. */
   requireLicense?: boolean;
   publicKeys?: string[];
+  /** Default true: when a freshly applied UI crashes, send one hidden turn asking the model to fix it. */
+  repairOnError?: boolean;
 }
 
 export interface UseVeneerGenerateResult {

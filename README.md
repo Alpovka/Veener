@@ -91,13 +91,16 @@ Then two more things, which are not boundaries but make the boundaries hard to r
   delay it.
 
 **Known limits.** Generated UI is real DOM in your page, so it can *look like* anything — a fake
-login form is a spoofing risk, exactly as it would be with any user-generated content; the
-canvas cannot submit or navigate, but treat what users type into generated views accordingly. Text
-is the only channel out of the interpreter (there is no network and no navigation), so data you
-push in can only reach the user's screen; still, push only registered sources you would show that
-user anyway. The worker compiles WebAssembly, so a host Content-Security-Policy needs
-`script-src 'wasm-unsafe-eval'` and `worker-src 'self'`. The legacy iframe engine (`VeneerFrame`)
-stays one more release for hosts that need it; its residuals are in `packages/react/README.md`.
+login form is a spoofing risk, exactly as it would be with any user-generated content; the canvas
+draws a persistent "AI-generated view" badge that generated code cannot cover, cannot submit or
+navigate, but treat what users type into generated views accordingly. Text is the only channel out
+of the interpreter (there is no network and no navigation) unless the host opts into images/links
+for listed origins (`allow`), so data you push in can only reach the user's screen; still, push
+only registered sources you would show that user anyway. Generated code cannot measure or scroll
+elements. The worker compiles WebAssembly fetched from your origin, so a host
+Content-Security-Policy needs `script-src 'wasm-unsafe-eval'`, `worker-src 'self'` and
+`connect-src 'self'`. The legacy iframe engine (`VeneerFrame`) stays one more release for hosts
+that need it; its residuals are in `packages/react/README.md`.
 
 **The server owns the registry.** The client sends `{ message, history, currentUI }` only; the
 generator endpoint (`createVeneerHandler` from `@veneer/server`) builds the prompt from *its*
@@ -153,10 +156,10 @@ packages: the client (MIT, browser) and the endpoint (commercial, server). Both 
 JavaScript plus TypeScript declarations, so no bundler configuration is needed. The shared internals
 live in the private `packages/core` workspace and are bundled into each at build time.
 
-One static file to serve: copy `node_modules/@veneer/react/dist/veneer-worker.js` to your public
-directory (the demo does it in a `prebuild` script), or pass `workerUrl` to `VeneerCanvas`. If your
-page has a Content-Security-Policy, add `'wasm-unsafe-eval'` to `script-src` and `'self'` to
-`worker-src`.
+Two static files to serve: copy `node_modules/@veneer/react/dist/veneer-worker.js` and
+`veneer-worker.wasm` to your public directory (the demo does it in a `prebuild` script), or pass
+`workerUrl` to `VeneerCanvas`. If your page has a Content-Security-Policy, add `'wasm-unsafe-eval'`
+to `script-src` and `'self'` to `worker-src` and `connect-src`.
 
 The registry's plain-English descriptions are handed to the model so it knows what it can do; the
 registry's ids are what the bridge enforces at runtime. Generated code reads data via

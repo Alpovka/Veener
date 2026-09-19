@@ -1,9 +1,12 @@
 'use client';
-import React, { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react';
 import { useVeneer } from '../context.js';
 import { runBridgeAction, pickRegisteredData, createRateLimiter, BridgeError, PROTOCOL_VERSION } from '@veneer/core';
 import { createTree } from './tree.js';
-import { sanitizeTag, sanitizeAttrs, sanitizeClass, sanitizeStyle, EVENT_PROP, isTextControl, eventPayload } from './sanitize.js';
+import { sanitizeTag, sanitizeAttrs, sanitizeClass, sanitizeStyle, EVENT_PROP, isTextControl, eventPayload, normalizeAllow, DEFAULT_ALLOW } from './sanitize.js';
+
+const SNAPSHOT_TIMEOUT_MS = 300;
+const CRASH_KINDS = new Set(['render', 'runtime', 'compile']);
 
 export const DEFAULT_WORKER_URL = '/veneer-worker.js';
 
@@ -75,12 +78,14 @@ export function hasWarmWorker(workerUrl = DEFAULT_WORKER_URL) {
 export function VeneerCanvas(props) {
   const { generation, loaded } = useVeneer();
   // The last rendered height survives the swap to a new instance, so the page does not collapse
-  // and jump while the next UI boots.
+  // and jump while the next UI boots. `carryRef` hands the previous interpreter's component state
+  // and the focused element to the next instance (see teardown / the `ready` handler).
   const heightRef = useRef(0);
+  const carryRef = useRef(null);
   if (!loaded) {
     return <div className={props.className} style={Object.assign({ minHeight: props.minHeight || 120 }, props.style)} aria-busy="true" />;
   }
-  return <CanvasInstance key={generation} {...props} heightRef={heightRef} />;
+  return <CanvasInstance key={generation} {...props} heightRef={heightRef} carryRef={carryRef} />;
 }
 
 function CanvasInstance({
@@ -101,10 +106,19 @@ function CanvasInstance({
   bleed = 280,
   /** Keep a spare worker booted for the next UI (default true). */
   warm = true,
+  /** Image/link URL prefixes the renderer may load (default: none; overrides the provider's `allow`). */
+  allow: allowProp,
+  /** Interpreter limits: { entryMs, initialEvalMs, memoryMB, maxOpsPerFlush } (clamped in the worker). */
+  limits,
+  /** Persistent marker that this area is AI-generated (spoofing defence). A string, a node, or false. */
+  badge = 'AI-generated view',
   heightRef,
+  carryRef,
 }) {
   const ctx = useVeneer();
   const { ui, registry, actions, data, flagViolation, themeVars, resolvedMode, violation } = ctx;
+  const allowKey = JSON.stringify(allowProp !== undefined ? allowProp : ctx.allow || null);
+  const allow = useMemo(() => (allowKey === 'null' ? DEFAULT_ALLOW : normalizeAllow(JSON.parse(allowKey))), [allowKey]);
   const [version, setVersion] = useState(0);
   const [started, setStarted] = useState(false);
   const [dead, setDead] = useState(null);
@@ -140,9 +154,9 @@ function CanvasInstance({
       if (!s.dead) warmSpare(workerUrl);
     }, 150);
   }, [warm, workerUrl]);
-  const latest = useRef({ ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation });
+  const latest = useRef({ ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation, carryState: ctx.carryState, reportEngineError: ctx.reportEngineError, limits });
   useLayoutEffect(() => {
-    latest.current = { ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation };
+    latest.current = { ui, registry, actions, data, onError, onLog, onSecurityViolation, flagViolation, carryState: ctx.carryState, reportEngineError: ctx.reportEngineError, limits };
   });
 
   const report = useCallback((err) => {
@@ -194,28 +208,65 @@ function CanvasInstance({
     [report]
   );
 
-  const teardown = useCallback(() => {
-    const s = st.current;
-    s.dead = true;
-    if (s.heartbeat) clearInterval(s.heartbeat);
-    if (s.readyTimer) clearTimeout(s.readyTimer);
-    s.heartbeat = null;
-    s.readyTimer = null;
-    if (s.worker) {
-      try {
-        s.worker.postMessage({ type: 'dispose' });
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        s.worker.terminate();
-      } catch (e) {
-        /* ignore */
-      }
+  /**
+   * Stop this instance. With `{ snapshot: true }` (a swap to the next UI, not a violation) the
+   * worker is first asked for the live component state and the focused element is recorded; both
+   * are left in `carryRef` for the next instance, and the worker is terminated once it answers (or
+   * after SNAPSHOT_TIMEOUT_MS — a stuck interpreter must never delay the swap).
+   */
+  const teardown = useCallback(
+    (opts) => {
+      const s = st.current;
+      if (s.dead) return;
+      s.dead = true;
+      if (s.heartbeat) clearInterval(s.heartbeat);
+      if (s.readyTimer) clearTimeout(s.readyTimer);
+      s.heartbeat = null;
+      s.readyTimer = null;
+      const worker = s.worker;
       s.worker = null;
-    }
-    removeCss();
-  }, [removeCss]);
+      removeCss();
+      const kill = () => {
+        if (!worker) return;
+        try {
+          worker.postMessage({ type: 'dispose' });
+        } catch (e) {
+          /* ignore */
+        }
+        try {
+          worker.terminate();
+        } catch (e) {
+          /* ignore */
+        }
+      };
+      if (!(opts && opts.snapshot) || !worker || !s.ready || !carryRef) return kill();
+      // The focused element was captured by the layout-effect cleanup, while the old DOM still existed.
+      const focus = s.capturedFocus || null;
+      s.capturedFocus = null;
+      const promise = new Promise((resolve) => {
+        let done = false;
+        const finish = (state) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          kill();
+          resolve(state);
+        };
+        const timer = setTimeout(() => finish(null), SNAPSHOT_TIMEOUT_MS);
+        worker.onmessage = (ev) => {
+          const d = ev.data;
+          if (d && d.type === 'snapshot') finish(typeof d.state === 'string' ? d.state : null);
+        };
+        try {
+          worker.postMessage({ type: 'snapshot' });
+        } catch (e) {
+          finish(null);
+        }
+      });
+      carryRef.current = { promise, focus, at: Date.now() };
+    },
+    [removeCss, carryRef]
+  );
 
   const violate = useCallback(
     (reason, detail) => {
@@ -264,18 +315,37 @@ function CanvasInstance({
         s.ready = true;
         if (s.readyTimer) clearTimeout(s.readyTimer);
         s.readyTimer = null;
-        const { ui, registry: reg, data } = latest.current;
-        const registered = pickRegisteredData(reg, data);
-        s.lastSent = registered;
-        post({
-          type: 'init',
-          v: PROTOCOL_VERSION,
-          code: ui,
-          data: registered,
-          actionIds: ((reg && reg.actions) || []).map((a) => a.id),
-          dataIds: ((reg && reg.dataSources) || []).map((x) => x.id),
-          options: { actionTimeoutMs },
-        });
+        // A small edit of the previous UI carries its component state over (see teardown).
+        const carry = carryRef && carryRef.current && latest.current.carryState && Date.now() - carryRef.current.at < 10000 ? carryRef.current : null;
+        if (carryRef) carryRef.current = null;
+        const init = (restore) => {
+          if (s.dead) return;
+          const { ui, registry: reg, data, limits: lim } = latest.current;
+          const registered = pickRegisteredData(reg, data);
+          s.lastSent = registered;
+          if (carry && carry.focus && carry.focus.id) s.pendingFocus = carry.focus;
+          post({
+            type: 'init',
+            v: PROTOCOL_VERSION,
+            code: ui,
+            data: registered,
+            actionIds: ((reg && reg.actions) || []).map((a) => a.id),
+            dataIds: ((reg && reg.dataSources) || []).map((x) => x.id),
+            restore: restore || undefined,
+            options: { actionTimeoutMs, limits: lim || undefined },
+          });
+        };
+        if (carry) {
+          carry.promise.then((state) => {
+            let restore = null;
+            try {
+              restore = state ? JSON.parse(state) : null;
+            } catch (e) {
+              restore = null;
+            }
+            init(restore && typeof restore === 'object' ? restore : null);
+          });
+        } else init(null);
         s.heartbeat = setInterval(() => {
           if (s.dead) return;
           if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
@@ -328,7 +398,13 @@ function CanvasInstance({
             reply(false, safe ? String(err.message) : 'The action failed.');
           });
       } else if (d.type === 'error') {
-        report({ type: 'engine-error', kind: d.kind, stage: d.stage, message: String(d.message || '') });
+        const err = { type: 'engine-error', kind: d.kind, stage: d.stage, message: String(d.message || '') };
+        report(err);
+        // Crashes (not deadlines, not style problems) are also recorded on the provider so a chat
+        // built on useVeneerGenerate can ask the model for a fix.
+        if (CRASH_KINDS.has(d.kind) && typeof latest.current.reportEngineError === 'function') {
+          latest.current.reportEngineError({ kind: d.kind, stage: d.stage, message: err.message, code: latest.current.ui });
+        }
       } else if (d.type === 'log') {
         const cb = latest.current.onLog;
         if (typeof cb === 'function') {
@@ -393,6 +469,22 @@ function CanvasInstance({
     if (h > 0) heightRef.current = h;
   }, [version, started, heightRef]);
 
+  // Layout-effect cleanup runs while this instance's DOM is still attached (before React removes
+  // it), which is the last moment the focused generated element can be read for carry-over.
+  useLayoutEffect(() => {
+    const s = st.current;
+    return () => {
+      try {
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        if (active && rootRef.current && rootRef.current.contains(active) && active.getAttribute('id')) {
+          s.capturedFocus = { id: active.getAttribute('id'), start: typeof active.selectionStart === 'number' ? active.selectionStart : null, end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null };
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    };
+  }, []);
+
   // Real unmount (not StrictMode's simulated one): tear the worker down.
   const mountedAgain = useRef(false);
   useEffect(() => {
@@ -406,7 +498,7 @@ function CanvasInstance({
     return () => {
       cancelled = true;
       Promise.resolve().then(() => {
-        if (cancelled && !mountedAgain.current) teardown();
+        if (cancelled && !mountedAgain.current) teardown({ snapshot: true });
       });
     };
   }, [teardown]);
@@ -425,14 +517,39 @@ function CanvasInstance({
     post({ type: 'data', data: registered });
   }, [data, registry, post]);
 
-  // Programmatic focus requested by generated code.
+  // Programmatic focus requested by generated code, and the focus carried over from the previous
+  // UI (matched by the generated element id, which survives an edit).
   useEffect(() => {
+    const s = st.current;
+    if (!rootRef.current) return;
     const ids = treeRef.current.takeFocus();
-    if (!ids.length || !rootRef.current) return;
-    const id = ids[ids.length - 1];
-    const el = rootRef.current.querySelector(`[data-vid="${id}"]`);
-    if (el && typeof el.focus === 'function') el.focus({ preventScroll: true });
-  }, [version]);
+    if (ids.length) {
+      const el = rootRef.current.querySelector(`[data-vid="${ids[ids.length - 1]}"]`);
+      if (el && typeof el.focus === 'function') el.focus({ preventScroll: true });
+      return;
+    }
+    if (s.pendingFocus && started) {
+      const f = s.pendingFocus;
+      s.pendingFocus = null;
+      let el = null;
+      try {
+        el = rootRef.current.querySelector(`[id="${String(f.id).replace(/"/g, '')}"]`);
+      } catch (e) {
+        el = null;
+      }
+      if (el && typeof el.focus === 'function') {
+        el.focus({ preventScroll: true });
+        if (f.start != null && typeof el.setSelectionRange === 'function') {
+          try {
+            const len = String(el.value || '').length;
+            el.setSelectionRange(Math.min(f.start, len), Math.min(f.end == null ? f.start : f.end, len));
+          } catch (e) {
+            /* not a text control */
+          }
+        }
+      }
+    }
+  }, [version, started]);
 
   const dispatch = useCallback(
     (id, name, e) => {
@@ -479,38 +596,68 @@ function CanvasInstance({
   }
 
   const tree = treeRef.current;
-  const children = started && tree.root != null ? renderChildren(tree, tree.root, dispatch) : null;
+  const children = started && tree.root != null ? renderChildren(tree, tree.root, dispatch, allow) : null;
+  // The badge sits above anything generated (generated z-index is capped at 100) and cannot be
+  // covered, hidden or restyled by generated code: it is the one thing in the canvas the model
+  // does not control.
+  const marker =
+    started && badge !== false && badge != null ? (
+      <div className="veneer-badge" aria-label="AI-generated view" style={BADGE_STYLE}>
+        {badge}
+      </div>
+    ) : null;
   return (
     <div ref={rootRef} className={rootClass} style={rootStyle} data-veneer-engine="worker" aria-busy={started ? undefined : 'true'}>
       {children}
+      {marker}
     </div>
   );
 }
 
+const BADGE_STYLE = {
+  position: 'absolute',
+  top: 6,
+  right: 6,
+  zIndex: 101,
+  pointerEvents: 'none',
+  fontSize: 10,
+  lineHeight: '14px',
+  padding: '2px 7px',
+  borderRadius: 999,
+  background: 'rgba(100, 116, 139, 0.14)',
+  color: 'var(--veneer-muted, #64748b)',
+  fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+  letterSpacing: '0.02em',
+  userSelect: 'none',
+};
+
 // ---------------------------------------------------------------------------------------------
 // Rendering the mirrored tree through the allowlist
 // ---------------------------------------------------------------------------------------------
-function renderChildren(tree, id, dispatch) {
+function renderChildren(tree, id, dispatch, allow) {
   const n = tree.nodes.get(id);
   if (!n) return null;
   const out = [];
   for (const cid of n.children) {
-    const el = renderNode(tree, cid, dispatch);
+    const el = renderNode(tree, cid, dispatch, allow);
     if (el !== null) out.push(el);
   }
   return out;
 }
 
-function renderNode(tree, id, dispatch) {
+function renderNode(tree, id, dispatch, allow) {
   const n = tree.nodes.get(id);
   if (!n) return null;
   if (n.tag === null) return typeof n.text === 'string' ? n.text : null;
-  const t = sanitizeTag(n.tag, n.ns);
+  const t = sanitizeTag(n.tag, n.ns, allow);
   if (t.drop) return null;
   // A demoted element (`a` → span) keeps its safe attributes (id, aria-*, data-*, title); the ones
-  // that made it dangerous (href, target, download…) are not in the allowlist for any tag.
-  const tag = t.tag || t.demote;
-  const props = sanitizeAttrs(tag, n.attrs);
+  // that made it dangerous (href, target, download…) are not in the allowlist for any tag. With a
+  // host `allow` policy, `img`/`a` survive and their URL is checked against it in sanitizeAttrs.
+  let tag = t.tag || t.demote;
+  const props = sanitizeAttrs(tag, n.attrs, allow);
+  if (tag === 'img' && !props.src) return null; // allowed element, disallowed URL
+  if (tag === 'a' && !props.href) tag = 'span'; // allowed element, disallowed destination → plain text
   props.key = id;
   props['data-vid'] = id;
   const cls = sanitizeClass(n.attrs.class);
@@ -533,7 +680,7 @@ function renderNode(tree, id, dispatch) {
   }
   if (tag === 'form' && !n.listeners.has('submit')) props.onSubmit = (e) => e.preventDefault(); // never navigate
 
-  const children = tag === 'textarea' || tag === 'input' ? null : renderChildren(tree, id, dispatch);
+  const children = tag === 'textarea' || tag === 'input' || tag === 'img' ? null : renderChildren(tree, id, dispatch, allow);
 
   if (isControl) {
     const value = n.props.value !== undefined ? n.props.value : props.value !== undefined ? props.value : props.defaultValue;
@@ -557,7 +704,21 @@ function Control({ tag, props, value, checked, children }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (value !== undefined && el.value !== value) el.value = value;
+    if (value !== undefined && el.value !== value) {
+      // The interpreter rewrote what the user typed (a mask, a max length, uppercase): apply it
+      // without throwing the caret to the end of the field.
+      const active = typeof document !== 'undefined' && document.activeElement === el;
+      const pos = active && typeof el.selectionStart === 'number' ? el.selectionStart : null;
+      el.value = value;
+      if (pos != null && typeof el.setSelectionRange === 'function') {
+        try {
+          const p = Math.min(pos, String(value).length);
+          el.setSelectionRange(p, p);
+        } catch (e) {
+          /* not a text control */
+        }
+      }
+    }
     if (checked !== undefined && el.checked !== checked) el.checked = checked;
   }, [value, checked]);
   const p = Object.assign({}, props, { ref });

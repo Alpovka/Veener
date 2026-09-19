@@ -33,6 +33,8 @@ export const DEFAULT_UI = `function VeneerUI() {
       <form id="form" onSubmit={(e) => { e.preventDefault(); setLast('submitted'); }}><button id="submit" type="submit">submit</button></form>
       <a id="link" href="/steal?via=anchor">link text</a>
       <img id="img" src="/steal?via=img" alt="x" />
+      <img id="okimg" src="/img/ok.png" alt="ok" />
+      <a id="oklink" href="https://example.com/x">ok link</a>
       <div id="sty" style={{ backgroundImage: 'url(/steal?via=css)', color: 'rgb(1, 2, 3)', position: 'fixed', zIndex: 99999 }}>styled</div>
       <div id="cls" className="bg-[url(/steal?via=class)] text-[11px]">cls</div>
       <ul>{tasks.map((t) => <li key={t.id} className="task">{t.title}</li>)}</ul>
@@ -50,6 +52,8 @@ function Probe() {
 function App() {
   const params = new URLSearchParams(location.search);
   const dark = params.get('dark') === '1';
+  // ?allow=1: the host lets generated UI show images from /img/ and link to example.com.
+  const allow = params.get('allow') === '1' ? { images: [location.origin + '/img/'], links: ['https://example.com/'] } : undefined;
   const theme = {
     mode: dark ? 'dark' : 'light',
     colors: { primary: '#0f766e', primaryForeground: '#ffffff', accent: '#7c3aed', background: { light: '#fffdf7', dark: '#101418' } },
@@ -75,7 +79,7 @@ function App() {
   window.__events = window.__events || [];
   window.__logs = window.__logs || [];
   return (
-    <VeneerProvider registry={registry} actions={actions} data={data} defaultUI={DEFAULT_UI} persist="memory" theme={theme} onSecurityViolation={(v) => window.__events.push({ kind: 'violation', reason: v.reason })}>
+    <VeneerProvider registry={registry} actions={actions} data={data} defaultUI={DEFAULT_UI} persist="memory" theme={theme} allow={allow} onSecurityViolation={(v) => window.__events.push({ kind: 'violation', reason: v.reason })}>
       <Probe />
       <div id="host-h1-probe">
         <h1 id="host-h1">host heading</h1>
