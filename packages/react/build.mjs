@@ -3,9 +3,10 @@
  *
  *  1. `dist/guest.bundle.txt` — the guest runtime (Preact + MiniDOM + shims + veneer API) as one
  *     script, evaluated INSIDE QuickJS. Emitted as .txt so step 2 can inline it as a string.
- *  2. `dist/veneer-worker.js` — the Web Worker: QuickJS (single-file wasm variant), the JSX
- *     compiler, Tailwind v4 with its stylesheets inlined, and the guest bundle. Self-contained:
- *     hosts serve this one file from their origin (default `/veneer-worker.js`).
+ *  2. `dist/veneer-worker.js` + `dist/veneer-worker.wasm` — the Web Worker: the JSX compiler,
+ *     Tailwind v4 with its stylesheets inlined, the guest bundle, and QuickJS as a separate
+ *     WebAssembly file fetched next to the worker (streaming compile, cached by the browser; a third
+ *     smaller than embedding it as base64). Hosts serve both files from their origin.
  *  3. `dist/index.js` — the React SDK (plain ESM, JSX compiled with the automatic runtime).
  *     React stays external; `@veneer/core` (a private workspace) is bundled in, so the package has
  *     no runtime dependencies besides React. The 'use client' directive is re-added as a banner.
@@ -60,6 +61,8 @@ await build({
   legalComments: 'none',
   logLevel: 'warning',
 });
+const qjsDir = dirname(require.resolve('@jitl/quickjs-wasmfile-release-sync/package.json'));
+await copyFile(resolve(qjsDir, 'dist/emscripten-module.wasm'), resolve(dist, 'veneer-worker.wasm'));
 
 // 3. SDK
 await build({

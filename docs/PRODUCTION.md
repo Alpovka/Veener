@@ -61,8 +61,12 @@ permanent. Both scopes were free on 2026-09-17; the unscoped name `veneer` is ta
   the optional waitlist variables.
 - Node 24 (`.nvmrc`; the demo's `engines.node` tells Vercel the same). The API route declares `maxDuration = 60`; the model call times out at 45 s.
 - The engine worker: `npm run build` in the demo first copies `@veneer/react/dist/veneer-worker.js`
-  to `public/` (`scripts/copy-worker.mjs`, ignored by git). The site CSP allows
-  `'wasm-unsafe-eval'` and `worker-src 'self'` for it; nothing else about the policy is engine-specific.
+  and `veneer-worker.wasm` to `public/` (`scripts/copy-worker.mjs`, ignored by git). The site CSP
+  allows `'wasm-unsafe-eval'`, `worker-src 'self'` and `connect-src 'self'` (the wasm fetch) for it;
+  nothing else about the policy is engine-specific. Both files are cached for a day and replaced by
+  every deploy.
+- The demo allows same-origin images and links for generated UI (`allow` in `veneer.config.js`,
+  passed to both the provider and the handler); its `img-src 'self' data:` CSP applies on top.
 
 ## 5. Before the first customer
 

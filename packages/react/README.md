@@ -15,11 +15,13 @@ These are the only two packages. `@veneer/react` has no runtime dependencies bes
 declarations, so it works in Next.js, Vite, Remix and plain webpack without any bundler
 configuration.
 
-**One static file.** The engine runs in a Web Worker. Serve `dist/veneer-worker.js` from your
-origin — copy it to your public directory (the demo does it in a `prebuild` script) so it is
-available at `/veneer-worker.js`, or pass `workerUrl`. If your page sets a Content-Security-Policy,
-allow `'wasm-unsafe-eval'` in `script-src` and `'self'` in `worker-src`; that is all the engine needs
-(no `'unsafe-eval'`, no `'unsafe-inline'`, no CDN).
+**Two static files.** The engine runs in a Web Worker. Serve `dist/veneer-worker.js` and
+`dist/veneer-worker.wasm` from your origin, side by side — copy them to your public directory (the
+demo does it in a `prebuild` script) so they are available at `/veneer-worker.js` and
+`/veneer-worker.wasm`, or pass `workerUrl` (the `.wasm` is loaded from the same directory). If your
+page sets a Content-Security-Policy, allow `'wasm-unsafe-eval'` in `script-src`, `'self'` in
+`worker-src` and `'self'` in `connect-src`; that is all the engine needs (no `'unsafe-eval'`, no
+`'unsafe-inline'`, no CDN).
 
 ## Three things, no UI opinions
 
@@ -63,7 +65,14 @@ export default function Page({ userId }) {
   `onError`, `onLog` (generated code's `console`), `onSecurityViolation`, `actionTimeoutMs`,
   `heartbeatMs`/`maxMissedHeartbeats`, `bleed` (how far popovers may hang below the canvas),
   `warm` (default true: keep one spare worker booted so the next UI swaps in ~100–200 ms instead
-  of a ~1 s cold start; the previous height is held during the swap so the page does not jump).
+  of a ~1 s cold start; the previous height is held during the swap so the page does not jump),
+  `allow` (image/link URL prefixes the renderer may load — default none), `limits` (interpreter
+  deadlines/memory for heavy views, clamped), `badge` (the persistent "AI-generated view" marker;
+  a string, a node or `false`).
+- **State carry-over.** Every UI still runs in a fresh interpreter, but for an edit (`mode: 'edit'`),
+  undo or a runtime repair the canvas snapshots the previous interpreter's `useState` values (keyed
+  by component, vnode key and hook index) and hands them to the next one, and focus returns to the
+  same element. Half-typed text and open rows survive small changes; a new view starts clean.
 - **`useVeneerGenerate()`** is headless: `generate(message)` posts `{ message, history,
   currentUI }` to your endpoint (default `/api/veneer`) and swaps in the returned code. Build any
   chat box, command palette or button on top. The registry is never sent; the server owns it.
@@ -72,6 +81,10 @@ Small requests are fast: the server classifies "make that button collapsible" as
 asks the model for a few search/replace edits against the current UI instead of a whole new
 component, so tweaks land in a second or two while new layouts take the full generation. Each
 history turn carries `mode: 'edit' | 'design'` if your chat UI wants to show it.
+
+If a freshly applied UI crashes at runtime (something the static scan cannot see), the hook sends
+one hidden turn asking the model to fix it and applies the fix (`repairOnError: false` to disable;
+filter `history` on `hidden` in your chat UI).
 
 The endpoint is `createVeneerHandler` from `@veneer/server` (self-hosted, license key) or
 Veneer Cloud (hosted, API key). Both return `{ code, intent, reply, mode, token }`: `code` is `null`
@@ -104,14 +117,38 @@ brand tokens mapped to the `--veneer-*` variables the provider sets on the canva
 under `.veneer-canvas`, and installed via `adoptedStyleSheets`. Host CSS cannot restyle generated
 nodes and generated CSS cannot restyle the host.
 
+## Images and links
+
+Off by default: `<img>` is dropped and `<a href>` becomes plain text, because either would load or
+follow a URL with the user's cookies. Opt in per host:
+
+```jsx
+<VeneerProvider allow={{ images: ['same-origin', 'https://cdn.acme.com/'], links: ['same-origin'] }} …>
+// and on the server, so the model is told what it may use:
+createVeneerHandler({ registry, allow: { images: [...], links: [...] }, … })
+```
+
+Entries are URL prefixes or the keywords `'same-origin'`, `'https:'` (any https URL) and, for images,
+`'data:'` (inline base64 raster/SVG). Allowed images render lazily with `referrerpolicy=no-referrer`;
+allowed cross-origin links open in a new tab with `rel="noopener noreferrer nofollow"`. Your page's
+own CSP (`img-src`) still applies on top.
+
 ## Residual risks
 
 - **UI spoofing.** Generated UI is real DOM in your page and can look like anything, including a
   fake login form. It cannot submit, navigate or reach the network, so what a user types stays on
-  their screen; still treat it like any user-generated content.
+  their screen. The persistent badge (`badge` prop) marks the area as AI-generated and cannot be
+  covered by generated code; still treat generated views like any user-generated content.
 - **CPU.** A hot loop is interrupted at its deadline (250 ms per event, 2 s at start-up; three in a
-  row end the UI). A native allocation loop cannot be interrupted mid-allocation and can hold the
-  worker for a few seconds before the heartbeat terminates it; the page itself never freezes.
+  row end the UI; `limits` loosens these for heavy views, up to 2 s / 10 s). A native allocation
+  loop cannot be interrupted mid-allocation and can hold the worker for a few seconds before the
+  heartbeat terminates it; the page itself never freezes.
+- **No measurement.** Generated code cannot read element sizes or positions
+  (`getBoundingClientRect` is all zeros, observers never fire) and cannot scroll; layouts that need
+  measuring (virtualised lists, popovers positioned by hand) must be expressed in CSS.
+- **State carry-over is best-effort.** It matches `useState` calls by component name, vnode key
+  and hook index; an edit that inserts a hook shifts the ones after it, which then fall back to their
+  code's initial values. Unkeyed repeated components share a slot.
 - **Layout.** Generated content can be tall or wide. The canvas is `contain: layout` with a clip
   and an `isolation` context; give it a `maxHeight` wrapper if your layout needs one.
 

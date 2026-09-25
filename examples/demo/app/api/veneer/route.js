@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { createVeneerHandler } from '@veneer/server';
-import { registry } from '../../veneer.config';
+import { registry, allow } from '../../veneer.config';
 
 export const runtime = 'nodejs';
 // The handler times the model out at 45 s (`timeoutMs`); give the function room to return a
@@ -47,6 +47,7 @@ async function generate({ system, messages, signal, mode }) {
 
 const common = {
   registry,
+  allow,
   rateLimit: { limit: 20, windowMs: 60000 },
   brand: { name: 'Veneer', tone: 'clean, modern, quietly confident' },
   onError: (err, ctx) => console.error('[veneer]', err && err.message ? err.message : err, ctx),

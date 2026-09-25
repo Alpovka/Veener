@@ -46,7 +46,7 @@ const nextConfig = {
       {
         // The engine worker is a versioned build product; a fresh deploy ships a fresh copy, and the
         // canvas fetches it by a stable path, so it may be cached for a day.
-        source: '/veneer-worker.js',
+        source: '/veneer-worker.:ext(js|wasm)',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, must-revalidate' }],
       },
     ];

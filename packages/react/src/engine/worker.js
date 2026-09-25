@@ -3,23 +3,27 @@
  * evaluates generated code itself (no eval, no Function): generated code only ever runs inside the
  * interpreter. Everything that crosses to the page is plain JSON.
  *
- * Host → worker:  init · event · data · action-result · ping · dispose
+ * Host → worker:  init · event · data · action-result · snapshot · ping · dispose
  * Worker → host:  ready · started · ops (with css when new classes appeared) · action · error ·
- *                 fatal · pong · log
+ *                 fatal · snapshot · pong · log
+ *
+ * The interpreter's WebAssembly lives next to this file as `veneer-worker.wasm` and is fetched
+ * with a streaming compile (the browser caches the compiled module), which is why the host CSP
+ * needs `connect-src 'self'` besides `'wasm-unsafe-eval'`.
  *
  * Wall-clock watchdog: native allocation/GC inside QuickJS does not poll the interrupt handler, so
  * a memory-thrash loop can hold this thread for seconds despite the deadline. The host pings us;
  * while we are stuck we cannot pong, the host terminates the worker, and a fresh one is spawned.
  * That is the design ("terminate() as the last word"), not a gap.
  */
-import { newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
-import variant from '@jitl/quickjs-singlefile-browser-release-sync';
+import { newQuickJSWASMModuleFromVariant, newVariant } from 'quickjs-emscripten-core';
+import baseVariant from '@jitl/quickjs-wasmfile-release-sync';
 import GUEST from '../../dist/guest.bundle.txt';
 import indexCss from 'tailwindcss/index.css';
 import themeCss from 'tailwindcss/theme.css';
 import utilitiesCss from 'tailwindcss/utilities.css';
 import preflightCss from 'tailwindcss/preflight.css';
-import { createBox, LIMITS } from './vm.js';
+import { createBox, mergeLimits } from './vm.js';
 import { createTailwind } from './tailwind.js';
 import { safeClassTokens } from './classGrammar.js';
 
@@ -31,7 +35,11 @@ const send = (msg) => self.postMessage(msg);
 let box = null;
 let tailwind = null;
 let disposed = false;
+let cssSanityChecked = false;
 const timerHandles = new Map(); // guest timer id → real setTimeout handle
+
+const wasmLocation = new URL('veneer-worker.wasm', self.location.href).href;
+const variant = newVariant(baseVariant, { wasmLocation });
 
 const bootPromise = (async () => {
   const [QuickJS, tw] = await Promise.all([
@@ -46,7 +54,7 @@ const bootPromise = (async () => {
 })();
 bootPromise.then(
   () => send({ type: 'ready' }),
-  (e) => send({ type: 'fatal', reason: 'boot-failed', message: String((e && e.message) || e) })
+  (e) => send({ type: 'fatal', reason: 'boot-failed', message: `Could not start the interpreter (is ${wasmLocation} served next to the worker, and does the CSP allow connect-src 'self' and 'wasm-unsafe-eval'?): ` + String((e && e.message) || e) })
 );
 
 const io = {
@@ -116,6 +124,14 @@ function flushOps() {
         if (css.length > CSS_MAX_CHARS) {
           send({ type: 'error', kind: 'style', message: 'stylesheet too large; styling frozen' });
           css = undefined;
+        } else if (!cssSanityChecked) {
+          // Operational tripwire: a Tailwind/scoper drift that silently stops styles from applying
+          // is worse than a loud error. Check once that a plain utility we asked for came out scoped.
+          cssSanityChecked = true;
+          const probe = tokens.find((t) => /^[a-z][a-z0-9-]*$/.test(t) && !/^(group|peer|container|sr-only|not-sr-only)$/.test(t));
+          if (probe && (!css.includes(tailwind.scope) || !css.includes(`.${tailwind.prefix}\\:${probe}`))) {
+            send({ type: 'error', kind: 'style', message: `stylesheet sanity check failed: no scoped rule for "${probe}" (Tailwind or the scoper changed behaviour)` });
+          }
         }
       } catch (e) {
         send({ type: 'error', kind: 'style', message: String((e && e.message) || e) });
@@ -149,11 +165,22 @@ function dispose() {
 
 self.onmessage = async (ev) => {
   const d = ev.data;
-  if (!d || typeof d.type !== 'string' || disposed) return;
+  if (!d || typeof d.type !== 'string') return;
   if (d.type === 'ping') {
-    send({ type: 'pong', seq: d.seq });
+    if (!disposed) send({ type: 'pong', seq: d.seq });
     return;
   }
+  if (d.type === 'snapshot') {
+    // The page is about to replace this UI: hand over the live component state (section: carry-over).
+    let state = null;
+    if (box && !disposed) {
+      const r = box.snapshot();
+      if (!r.error) state = r.state;
+    }
+    send({ type: 'snapshot', state });
+    return;
+  }
+  if (disposed) return;
   if (d.type === 'dispose') {
     dispose();
     return;
@@ -167,7 +194,7 @@ self.onmessage = async (ev) => {
       return; // fatal already sent
     }
     if (disposed) return;
-    box = createBox(QuickJS, GUEST, io, LIMITS);
+    box = createBox(QuickJS, GUEST, io, mergeLimits(d.options && d.options.limits));
     let r = box.boot();
     if (r.error) return fatal('guest-boot-failed', r.error.message);
     r = box.configure({
@@ -175,6 +202,7 @@ self.onmessage = async (ev) => {
       dataIds: Array.isArray(d.dataIds) ? d.dataIds : [],
       data: d.data && typeof d.data === 'object' ? d.data : {},
       actionTimeoutMs: d.options && d.options.actionTimeoutMs,
+      restore: d.restore && typeof d.restore === 'object' ? d.restore : {},
     });
     if (r.error) return fatal('guest-config-failed', r.error.message);
     if (!d.code) {

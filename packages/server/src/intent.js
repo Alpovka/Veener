@@ -85,9 +85,17 @@ export function classifyScope(message, ctx = {}) {
   const m = String(message || '').trim();
   if (!ctx.currentUI || !m) return 'design';
   if (UNDO_REDO.test(m) || VAGUE_CHANGE.test(m)) return 'design';
-  if (m.split(/\s+/).length > 40) return 'design';
+  const words = m.split(/\s+/).length;
+  if (words > 25) return 'design';
   if (NEW_VIEW.test(m)) return 'design';
-  return TWEAK.test(m) ? 'edit' : 'design';
+  // "a header, a search box and a footer": three or more parts at once is a redesign, not a tweak.
+  if ((m.match(/,|\band\b|\bplus\b|\balso\b/gi) || []).length >= 2) return 'design';
+  if (TWEAK.test(m)) return 'edit';
+  // A short change request that names neither a new view nor a known tweak word ("show the tasks
+  // as a list", or a non-English phrasing): try edit mode. The edit prompt lets the model answer
+  // with full code if it judges the change too large, so the cost of guessing wrong is small.
+  if (words <= 15 && CHANGE_VERBS.test(m)) return 'edit';
+  return 'design';
 }
 
 /**

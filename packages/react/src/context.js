@@ -73,12 +73,25 @@ export function VeneerProvider({
   onSecurityViolation,
   theme: themeProp,
   onThemeError,
+  allow,
   children,
 }) {
   const [ui, setUiState] = useState(defaultUI);
   const [loaded, setLoaded] = useState(false);
   const [generation, setGeneration] = useState(0);
   const [violation, setViolation] = useState(null);
+  // True when the current generation is a small edit of the previous UI: the canvas then carries
+  // the previous interpreter's component state (typed text, open rows) into the new one.
+  const [carryState, setCarryState] = useState(false);
+  // The last crash reported by the engine for the current UI (render/runtime/compile), so a chat
+  // built on useVeneerGenerate can ask the model for a fix automatically.
+  const [engineError, setEngineError] = useState(null);
+  const reportEngineError = useCallback((err) => {
+    setEngineError((prev) => (prev && prev.code === (err && err.code) && prev.message === (err && err.message) ? prev : { ...(err || {}), at: Date.now() }));
+  }, []);
+  // What the allowlisted renderer may load: image and link URL prefixes (see VeneerCanvas `allow`).
+  const allowKey = JSON.stringify(allow || null);
+  const allowValue = useMemo(() => allow || null, [allowKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const violationTimes = useRef([]);
   const registryHash = useMemo(() => hashRegistry(registry), [registry]);
   const quarantineKey = storageKey + ':quarantine';
@@ -154,10 +167,12 @@ export function VeneerProvider({
   }, [persist, storageKey, registryHash]);
 
   const setUi = useCallback(
-    (code) => {
+    (code, opts) => {
       if (typeof code !== 'string') return;
       setUiState(code);
       setViolation(null);
+      setEngineError(null);
+      setCarryState(!!(opts && opts.carryState));
       setGeneration((g) => g + 1);
       const store = getStore(persist);
       if (store) {
@@ -181,6 +196,8 @@ export function VeneerProvider({
       }
     }
     setViolation(null);
+    setEngineError(null);
+    setCarryState(false);
     setUiState(defaultUI);
     setGeneration((g) => g + 1);
   }, [persist, storageKey, defaultUI]);
@@ -209,6 +226,7 @@ export function VeneerProvider({
       const isDefault = offending === defaultUI;
       const record = { ...(info || {}), at: now, remounted: !isDefault && !tooMany, quarantined: !!store };
       setViolation(record);
+      setCarryState(false);
       if (!isDefault) setUiState(defaultUI);
       if (record.remounted) setGeneration((g) => g + 1);
       const cb = onSecurityViolationRef.current;
@@ -252,10 +270,14 @@ export function VeneerProvider({
     loaded,
     defaultUI,
     generation,
+    carryState,
     violation,
     flagViolation,
     restoreQuarantined,
     clearViolation,
+    engineError,
+    reportEngineError,
+    allow: allowValue,
     storageKey,
     theme: resolvedTheme.theme,
     themeVars: resolvedTheme.vars,

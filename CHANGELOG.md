@@ -27,6 +27,45 @@ All notable changes to the Veneer packages. Versions follow semver; the two publ
   off (the demo does: Gemini 2.5 Flash, `thinkingBudget: 0`); Veneer Cloud's Gemini adapter does
   the same. Responses carry `mode` and `edited`; `editMode: false` on the handler disables it.
   `classifyScope`, `applyEdits`, `buildEditPrompt`, `buildEditRepairPrompt` are exported.
+- **State carry-over.** A small edit no longer throws away what the user was doing. The guest
+  runtime keys every `useState` by component name, vnode key and hook index; before the previous
+  interpreter is terminated the canvas asks it for a snapshot of those values (JSON only, 300 ms
+  budget) and hands it to the next one, which uses a carried value as the initial state when the key
+  exists and the type matches. Focus and caret return to the same generated element (matched by
+  id). Applied for `mode: 'edit'`, undo and runtime repairs; a new view starts clean.
+- **Runtime repair.** If a freshly applied UI crashes (a render error the static scan cannot see),
+  the canvas records it on the provider (`engineError`) and `useVeneerGenerate` sends one hidden
+  follow-up turn asking the model to fix it, then applies the fix. `repairOnError: false` disables;
+  hidden turns carry `hidden: true` in `history`.
+- **Images and links, opt-in.** `allow={{ images: [...], links: [...] }}` on the provider/canvas
+  (URL prefixes, or `'same-origin'`, `'https:'`, and for images `'data:'`) lets the renderer keep
+  `<img>` (lazy, no referrer, not draggable) and `<a href>` (cross-origin → new tab with
+  `noopener noreferrer nofollow`) for listed destinations only; everything else is still dropped or
+  demoted. Pass the same object to `createVeneerHandler({ allow })` and the prompt tells the model
+  what it may use.
+- **Spoofing marker.** The canvas draws a small persistent "AI-generated view" badge above anything
+  generated code can paint (its z-index is capped below it). `badge` prop: a string, a node, or
+  `false`.
+- **Smaller, faster engine download.** QuickJS ships as a separate `dist/veneer-worker.wasm`
+  (503 kB) next to a 650 kB `veneer-worker.js` instead of a 1.47 MB single file: streaming compile,
+  browser-cached compiled module, no base64 decode. Hosts serve both files; a CSP needs
+  `connect-src 'self'` for the fetch (plus `'wasm-unsafe-eval'` and `worker-src 'self'`).
+- **Tunable limits.** `<VeneerCanvas limits={{ entryMs, initialEvalMs, memoryMB, maxOpsPerFlush }}>`
+  for heavy views, clamped in the worker so deadlines can be loosened but never removed.
+- **Fewer "it rendered but does nothing" gaps.** The interpreter now provides inert
+  `ResizeObserver` / `IntersectionObserver` / `MutationObserver`, `matchMedia`, `getComputedStyle`,
+  `requestIdleCallback`, `Event`/`CustomEvent`, `Node`/`Element`/`HTMLElement` constructors for
+  `instanceof`, `navigator.clipboard`, `element.click()/dispatchEvent()/closest()/matches()` and
+  scroll no-ops; `document.activeElement` follows `focus()`. Controlled text inputs that rewrite what
+  the user typed keep the caret in place. The prompt tells the model elements cannot be measured.
+- **Edit mode robustness.** A third matching tier compares with whitespace collapsed and quote
+  style normalised (mapped back to the original span), so re-spaced JSX or `'`→`"` no longer forces a
+  full regeneration; results carry `fallback: true` when one happened. The scope classifier tries
+  edit mode for any short change request (the model may still answer with full code) and treats
+  multi-part requests as designs.
+- **Operational tripwire.** The worker checks once per UI that a plain utility class came out of
+  Tailwind scoped under `.veneer-canvas`; a compiler/scoper drift reports a `style` error instead of
+  silently unstyled views. Engine dependencies are pinned to exact versions.
 - **Warm spare worker.** `VeneerCanvas` keeps one extra engine worker booted in the background
   while a UI is showing and the next UI adopts it, so a swap takes ~100–200 ms instead of the ~1 s
   cold start (QuickJS + Tailwind). Still one fresh interpreter per UI. The previous UI's height is

@@ -27,9 +27,54 @@ const DEMOTE = new Set(['a', 'dialog', 'area', 'map', 'font', 'center', 'big', '
 const DROP = new Set(['img', 'picture', 'source', 'track', 'video', 'audio', 'iframe', 'frame', 'frameset', 'embed', 'object', 'param', 'link', 'script', 'style', 'base', 'meta', 'template', 'slot', 'canvas', 'noscript', 'applet', 'portal', 'html', 'head', 'body', 'title', 'use', 'image', 'foreignobject', 'clippath', 'mask', 'pattern', 'filter', 'marker', 'animate', 'set', 'animatemotion', 'animatetransform', 'script', 'math']);
 const SVG_CASE = { lineargradient: 'linearGradient', radialgradient: 'radialGradient', foreignobject: 'foreignObject', clippath: 'clipPath' };
 
+/**
+ * Host policy for the two things the allowlist refuses by default because they load or follow a
+ * URL: `<img src>` and `<a href>`. Each list holds URL prefixes (`https://cdn.example.com/`), or the
+ * keywords `'same-origin'` (the host page's own origin), `'https:'` (any https URL) and, for images
+ * only, `'data:'` (inline base64 raster/svg images). Empty lists keep the default: images dropped,
+ * links demoted to plain text.
+ */
+export const DEFAULT_ALLOW = Object.freeze({ images: [], links: [] });
+export function normalizeAllow(allow) {
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).map((x) => x.trim()) : typeof v === 'string' && v ? [v.trim()] : []);
+  return { images: list(allow && allow.images), links: list(allow && allow.links) };
+}
+const pageOrigin = () => (typeof location !== 'undefined' && location.origin ? location.origin : 'http://localhost');
+/** Absolute, normalised URL when `value` is allowed by `rules`, else null. */
+export function allowedUrl(value, rules, kind) {
+  if (!rules || !rules.length) return null;
+  const v = String(value == null ? '' : value).trim();
+  if (!v || v.length > CAPS.maxAttrChars) return null;
+  if (/^data:/i.test(v)) {
+    return kind === 'image' && rules.includes('data:') && /^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml);base64,[a-z0-9+/=]+$/i.test(v) ? v : null;
+  }
+  let u;
+  try {
+    u = new URL(v, pageOrigin() + '/');
+  } catch (e) {
+    return null;
+  }
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password) return null;
+  const same = u.origin === pageOrigin();
+  for (const rule of rules) {
+    if (rule === 'same-origin' && same) return u.href;
+    if (rule === 'https:' && u.protocol === 'https:') return u.href;
+    if (/^https?:\/\/[^/]+/i.test(rule) && u.href.startsWith(rule)) return u.href;
+  }
+  return null;
+}
+export function isSameOrigin(href) {
+  try {
+    return new URL(href).origin === pageOrigin();
+  } catch (e) {
+    return false;
+  }
+}
+
 /** @returns {{ tag: string } | { drop: true } | { demote: string }} */
-export function sanitizeTag(tag, ns) {
+export function sanitizeTag(tag, ns, allow = DEFAULT_ALLOW) {
   const t = String(tag || '').toLowerCase();
+  if (t === 'img' && allow && allow.images && allow.images.length) return { tag: 'img' };
   if (DROP.has(t)) return { drop: true };
   if (ns === 'svg') {
     if (SVG_ELEMENTS.has(t)) return { tag: SVG_CASE[t] || t };
@@ -37,6 +82,7 @@ export function sanitizeTag(tag, ns) {
   }
   if (HTML_ELEMENTS.has(t)) return { tag: t };
   if (t === 'svg') return { tag: 'svg' };
+  if (t === 'a' && allow && allow.links && allow.links.length) return { tag: 'a' };
   if (DEMOTE.has(t)) return { demote: 'span' };
   return { demote: 'div' };
 }
@@ -76,9 +122,17 @@ function prefixIds(v) {
 }
 
 /** attrs: { name: value } as recorded by the guest → React props (never class/style/events). */
-export function sanitizeAttrs(tag, attrs) {
+export function sanitizeAttrs(tag, attrs, allow = DEFAULT_ALLOW) {
   const out = {};
   let count = 0;
+  if (tag === 'img') {
+    // Only reachable when the host allowed images. Never eager, never with referrer, never a drag source.
+    out.alt = '';
+    out.loading = 'lazy';
+    out.decoding = 'async';
+    out.referrerPolicy = 'no-referrer';
+    out.draggable = false;
+  }
   for (const rawName of Object.keys(attrs || {})) {
     if (++count > CAPS.maxAttrs) break;
     const lower = String(rawName).toLowerCase();
@@ -88,6 +142,26 @@ export function sanitizeAttrs(tag, attrs) {
     if (value.length > CAPS.maxAttrChars) value = value.slice(0, CAPS.maxAttrChars);
     if (lower === 'class' || lower === 'classname' || lower === 'style') continue; // handled elsewhere
     if (lower.startsWith('on')) continue;
+    if (tag === 'img' && lower === 'src') {
+      const ok = allowedUrl(value, allow && allow.images, 'image');
+      if (ok) out.src = ok;
+      continue;
+    }
+    if (tag === 'img' && lower === 'alt') {
+      out.alt = value;
+      continue;
+    }
+    if (tag === 'a' && lower === 'href') {
+      const ok = allowedUrl(value, allow && allow.links, 'link');
+      if (ok) {
+        out.href = ok;
+        if (!isSameOrigin(ok)) {
+          out.target = '_blank';
+          out.rel = 'noopener noreferrer nofollow';
+        }
+      }
+      continue;
+    }
     if (lower.startsWith('aria-')) {
       if (!SAFE_NAME.test(lower.slice(5))) continue;
       out[lower] = ID_REF_ARIA.has(lower) ? prefixIds(value) : value;

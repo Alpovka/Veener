@@ -146,7 +146,7 @@ export function VeneerChat({ endpoint = '/api/veneer', suggestions, anchor = 'vi
                 </div>
               </div>
             )}
-            {history.map((m, i) => (
+            {history.filter((m) => !m.hidden).map((m, i) => (
               <div key={i} style={m.role === 'user' ? S.userMsg : S.aiMsg}>
                 {m.content}
                 {m.role === 'assistant' && m.changed && <div style={S.changedTag}>Canvas updated</div>}
